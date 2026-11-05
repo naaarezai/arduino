@@ -1,0 +1,29 @@
+# Flutter & Dart build artifacts
+robot_arm_app/build/
+robot_arm_app/.dart_tool/
+robot_arm_app/.flutter-plugins
+robot_arm_app/.flutter-plugins-dependencies
+robot_arm_app/.packages
+robot_arm_app/.pub-cache/
+robot_arm_app/.pub/
+
+# Android build & local files
+robot_arm_app/android/.gradle/
+robot_arm_app/android/local.properties
+robot_arm_app/android/app/build/
+*.keystore
+
+# iOS build files
+robot_arm_app/ios/Pods/
+robot_arm_app/ios/.symlinks/
+robot_arm_app/ios/Flutter/Flutter.framework
+robot_arm_app/ios/Flutter/Flutter.podspec
+
+# System & Editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.lock
+.vscode/
+.idea/
+*.iml
