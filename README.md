@@ -6,6 +6,26 @@ Projektissa on toteutettu teollisuusrobottien ohjauksesta tutut ominaisuudet: **
 
 ---
 
+## 📱 Pika-aloitus: Lataa valmis sovellus puhelimeen (APK)
+
+Etkö halua asentaa kehitysympäristöä tai koodata? Voit ladata valmiin ja testatun asennuspaketin suoraan Android-puhelimeesi:
+
+### 📥 [Lataa valmis APK tästä (app-release.apk)](https://github.com/naaarezai/arduino/raw/main/robot_arm_app/app-release.apk)
+
+### 📲 Asennus- ja käyttöohje (3 helppoa vaihetta):
+1. **Lataa tiedosto:** Avaa yllä oleva latauslinkki suoraan puhelimen selaimessa.
+2. **Asenna sovellus:**
+   * Avaa ladattu `app-release.apk` puhelimen ilmoituspalkista tai *Tiedostot / Lataukset* -kansiosta.
+   * Valitse **Asenna** (jos puhelin kysyy lupaa, salli asennus tuntemattomista lähteistä tälle selaimelle).
+3. **Aloita käsivarren ohjaus:**
+   * Kytke virta Arduino Uno R4 WiFiin (ja ulkoinen virtalähde servoille).
+   * Avaa **Robot Arm App** puhelimessasi.
+   * Myönnä sovellukselle Bluetooth-oikeudet.
+   * Napauta yläpalkin **"Ei yhteyttä"** -> Valitse listalta **Arduino-Arm** -> **Yhdistä**.
+   * Robottikäsivarsi on heti käyttövalmis!
+
+---
+
 ## 📸 Visuaalinen Identiteetti ja Käyttöliittymä
 
 * **Sovelluksen logo & Launcher Icon:** Mukautettu sovelluskuvake puhelimen aloitusnäytöllä.
