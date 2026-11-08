@@ -21,7 +21,7 @@ from src.ui.slider_panel import SliderPanel
 from src.ui.qt_compat import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QSplitter, QStatusBar, QMessageBox, Qt, QFrame, QPushButton,
-    QTabWidget, QTimer, QShortcut, QKeySequence
+    QTabWidget, QTimer, QShortcut, QKeySequence, QFileDialog
 )
 
 
@@ -159,6 +159,11 @@ class MainWindow(QMainWindow):
         btn_side.clicked.connect(lambda: self.visualizer_3d.view_side())
         view_bar.addWidget(btn_side)
 
+        btn_part = QPushButton("Import Part")
+        btn_part.setStyleSheet(btn_style_cam)
+        btn_part.clicked.connect(self._on_import_workpiece)
+        view_bar.addWidget(btn_part)
+
         # 3D Gizmo toggle button in 3D viewport header
         self.btn_view_gizmo = QPushButton("Interactive Gizmo")
         self.btn_view_gizmo.setCheckable(True)
@@ -289,6 +294,24 @@ class MainWindow(QMainWindow):
         self.workspace_stack.setCurrentIndex(index)
         for i, btn in enumerate(self.workspace_buttons):
             btn.setChecked(i == index)
+        if index == 1:
+            self.sim_panel.update_program_stats()
+
+    def _on_import_workpiece(self) -> None:
+        """Opens file dialog and loads a CAD STL model onto the table for seam planning."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Workpiece CAD Part (STL)",
+            "",
+            "STL 3D Files (*.stl);;All Files (*.*)"
+        )
+        if file_path:
+            ok = self.visualizer_3d.load_workpiece(file_path)
+            if ok:
+                from pathlib import Path
+                self.status_bar.showMessage(f"CAD-kappale ladattu: {Path(file_path).name} (pöytäkoordinaatit X=260, Y=0, Z=0)", 5000)
+            else:
+                QMessageBox.warning(self, "Virhe", "Kappaleen STL-tiedostoa ei voitu ladata.")
 
     def _connect_signals(self) -> None:
         self.serial_worker.connected.connect(self._on_serial_connected)
@@ -338,13 +361,16 @@ class MainWindow(QMainWindow):
             get_angles_fn=self._get_current_sim_angles
         )
         if active:
-            self.status_bar.showMessage("🎯 3D Interactive Jog Gizmo aktiivinen: Raahaa kouran palloa hiirellä 3D-ikkunassa!")
+            self.status_bar.showMessage("3D Interactive Jog Gizmo aktiivinen: Raahaa TCP-palloa hiirellä 3D-ikkunassa.")
         else:
             self.status_bar.showMessage("3D Interactive Gizmo suljettu.")
 
     def _on_program_changed(self) -> None:
         """Refreshes 3D trajectory path when statements change."""
-        self.visualizer_3d.update_trajectory_path(self.program.statements, self.kinematics)
+        if hasattr(self, "visualizer_3d"):
+            self.visualizer_3d.update_trajectory_path(self.program.statements, self.kinematics)
+        if hasattr(self, "sim_panel"):
+            self.sim_panel.update_program_stats()
 
     def _on_execute_robot(self, trajectory: List[List[int]]) -> None:
         """Streams compiled statement path directly to Arduino via SerialWorker."""
@@ -353,8 +379,8 @@ class MainWindow(QMainWindow):
                 self,
                 "Robotti Offline",
                 "Robotti ei ole yhdistetty sarjaporttiin!\n\n"
-                "Yhdistä Arduino USB-kaapelilla '🏠 Layout / Yhteys' -näkymästä ennen fyysistä ajoa.\n"
-                "Voit sillä välin testata liikkeen '▶️ Toista' -painikkeella näytöllä."
+                "Yhdistä Arduino USB-kaapelilla 'Layout & Connections' -näkymästä ennen fyysistä ajoa.\n"
+                "Voit sillä välin testata liikkeen 'Run Simulation' -painikkeella näytöllä."
             )
             return
 
@@ -369,7 +395,7 @@ class MainWindow(QMainWindow):
     def _on_robot_stream_tick(self) -> None:
         if self._robot_stream_index >= len(self._robot_stream_trajectory):
             self.stream_timer.stop()
-            self.status_bar.showMessage("✓ Liikesarja ajettu onnistuneesti fyysisellä robotilla!")
+            self.status_bar.showMessage("Liikesarja ajettu onnistuneesti fyysisellä robotilla.")
             return
 
         frame = self._robot_stream_trajectory[self._robot_stream_index]

@@ -6,7 +6,7 @@ Translates the taught RobotProgram routine into standard industrial robot langua
 3. ABB RAPID (MoveJ / MoveL industrial automation)
 4. KUKA KRL (PTP / LIN industrial automation)
 """
-from typing import List
+from typing import List, Optional
 from src.core.program import RobotProgram, MotionStatement, GripperStatement, DelayStatement
 from src.core.kinematics import RobotKinematics
 
@@ -32,7 +32,6 @@ class RobotPostProcessor:
             if isinstance(stmt, MotionStatement):
                 steps.append(f"  {{ {', '.join(str(a) for a in stmt.angles)} }}, // {stmt.statement_type} {stmt.target_id}")
             elif isinstance(stmt, GripperStatement):
-                # Repeat current pose but with gripper updated
                 steps.append(f"  // Gripper {stmt.action} (Jaw: {stmt.target_angle} deg)")
             elif isinstance(stmt, DelayStatement):
                 steps.append(f"  // Delay {stmt.duration_ms} ms")
@@ -61,8 +60,9 @@ class RobotPostProcessor:
         return "\n".join(cpp)
 
     @staticmethod
-    def to_gcode(program: RobotProgram, kinematics: RobotKinematics) -> str:
+    def to_gcode(program: RobotProgram, kinematics: Optional[RobotKinematics] = None) -> str:
         """Exports Cartesian path as standard industrial G-Code (ISO 6983)."""
+        kin = kinematics or getattr(program, "kinematics", None) or RobotKinematics()
         gcode = []
         gcode.append("; -------------------------------------------------------------")
         gcode.append(f"; Program: {program.name}")
@@ -75,12 +75,11 @@ class RobotPostProcessor:
         feedrate = 1200
         for i, stmt in enumerate(program.statements):
             if isinstance(stmt, MotionStatement):
-                pose = kinematics.forward_kinematics([float(a) for a in stmt.angles])
+                pose = kin.forward_kinematics([float(a) for a in stmt.angles])
                 cmd = "G1" if stmt.statement_type == "LIN" else "G0"
                 f_str = f" F{feedrate}" if cmd == "G1" else ""
                 gcode.append(f"{cmd} X{pose.tcp_x:.2f} Y{pose.tcp_y:.2f} Z{pose.tcp_z:.2f}{f_str} ; {stmt.target_id}")
             elif isinstance(stmt, GripperStatement):
-                # M-code for actuator (e.g. M3 = Tool On/Close, M5 = Tool Off/Open)
                 m_cmd = "M3 ; Tool On / Close Gripper" if stmt.action == "CLOSE" else "M5 ; Tool Off / Open Gripper"
                 gcode.append(m_cmd)
             elif isinstance(stmt, DelayStatement):
@@ -90,15 +89,16 @@ class RobotPostProcessor:
         return "\n".join(gcode)
 
     @staticmethod
-    def to_abb_rapid(program: RobotProgram, kinematics: RobotKinematics) -> str:
+    def to_abb_rapid(program: RobotProgram, kinematics: Optional[RobotKinematics] = None) -> str:
         """Exports routine as industrial ABB RAPID robot code."""
+        kin = kinematics or getattr(program, "kinematics", None) or RobotKinematics()
         rapid = []
         rapid.append("MODULE MainModule")
         rapid.append(f"  PROC {program.name}()")
 
         for stmt in program.statements:
             if isinstance(stmt, MotionStatement):
-                pose = kinematics.forward_kinematics([float(a) for a in stmt.angles])
+                pose = kin.forward_kinematics([float(a) for a in stmt.angles])
                 cmd = "MoveL" if stmt.statement_type == "LIN" else "MoveJ"
                 speed = f"v{int(stmt.speed_percent * 10)}"
                 p_str = f"[[{pose.tcp_x:.1f}, {pose.tcp_y:.1f}, {pose.tcp_z:.1f}], [1, 0, 0, 0], [0, 0, 0, 0], [9E9, 9E9, 9E9, 9E9, 9E9, 9E9]]"
@@ -112,3 +112,4 @@ class RobotPostProcessor:
         rapid.append(f"  ENDPROC")
         rapid.append("ENDMODULE")
         return "\n".join(rapid)
+

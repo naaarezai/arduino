@@ -13,7 +13,7 @@ from src.config import (
     LINK_0_HEIGHT, LINK_1_LENGTH, LINK_2_LENGTH, LINK_3_LENGTH,
     MODELS_DIR, STL_FILES
 )
-from src.core.kinematics import PoseData
+from src.core.kinematics import PoseData, translation_matrix
 from src.ui.qt_compat import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 
 
@@ -50,6 +50,7 @@ class ArmVisualizer3D(QWidget):
         self.gripper_left_actor: Optional[pv.Actor] = None
         self.gripper_right_actor: Optional[pv.Actor] = None
         self.tcp_actor: Optional[pv.Actor] = None
+        self.workpiece_actor: Optional[pv.Actor] = None
         self.trajectory_actors: List[pv.Actor] = []
         self.gizmo_widget = None
         self._current_tcp = [0.0, 0.0, 706.0]
@@ -87,7 +88,8 @@ class ArmVisualizer3D(QWidget):
         """Loads STL models with exact kinematic alignment, normal smoothing, and industrial PBR materials."""
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Coordinate alignment matrix for arm links: X_orig -> Y_new, Y_orig -> Z_new, Z_orig -> X_new
+        # Coordinate alignment matrix: maps STL axes to kinematic joint frame
+        # STL: X (pivot axis) -> Y_kin, Y (link length) -> Z_kin, Z (link normal) -> X_kin
         mat_align = np.array([
             [0.0, 0.0, 1.0, 0.0],
             [1.0, 0.0, 0.0, 0.0],
@@ -103,7 +105,7 @@ class ArmVisualizer3D(QWidget):
             base_m = base_m.compute_normals(auto_orient_normals=True)
         else:
             base_m = self._make_procedural_base()
-        self.actors.append(self.plotter.add_mesh(base_m, color="#2a2e33", specular=0.3, specular_power=15, smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(base_m, color="#25282e", specular=0.3, specular_power=15, smooth_shading=True))
 
         # 2. Link 1 (Turntable top plate sitting at Z = 100 on top of base)
         l1_f = MODELS_DIR / "link1.stl"
@@ -113,18 +115,19 @@ class ArmVisualizer3D(QWidget):
             l1_m = l1_m.compute_normals(auto_orient_normals=True)
         else:
             l1_m = self._make_procedural_link1()
-        self.actors.append(self.plotter.add_mesh(l1_m, color="#373d44", specular=0.4, specular_power=20, smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l1_m, color="#374151", specular=0.4, specular_power=20, smooth_shading=True))
 
         # 3. Link 2 (Upper Arm - arm1.stl): Industrial high-vis cyan
         l2_f = MODELS_DIR / "link2.stl"
         if l2_f.is_file():
             l2_m = pv.read(str(l2_f))
-            l2_m = l2_m.translate((0, 15.0, 0), inplace=False)
+            # Bottom pivot hole at (0, -21.03, 0) translated to origin
+            l2_m = l2_m.translate((0.0, 21.03, 0.0), inplace=False)
             l2_m = l2_m.transform(mat_align, inplace=False)
             l2_m = l2_m.compute_normals(auto_orient_normals=True)
         else:
             l2_m = self._make_procedural_link2()
-        self.actors.append(self.plotter.add_mesh(l2_m, color="#00838f", specular=0.5, specular_power=25, smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l2_m, color="#0284c7", specular=0.45, specular_power=25, smooth_shading=True))
 
         # 4. Link 3 (Forearm - arm1.stl): Precision silver-white
         l3_f = MODELS_DIR / "link3.stl"
@@ -132,38 +135,31 @@ class ArmVisualizer3D(QWidget):
             l3_f = l2_f
         if l3_f.is_file():
             l3_m = pv.read(str(l3_f))
-            l3_m = l3_m.translate((0, 15.0, 0), inplace=False)
+            # Bottom pivot hole at (0, -21.03, 0) translated to origin
+            l3_m = l3_m.translate((0.0, 21.03, 0.0), inplace=False)
             l3_m = l3_m.transform(mat_align, inplace=False)
             l3_m = l3_m.compute_normals(auto_orient_normals=True)
         else:
             l3_m = self._make_procedural_link3()
-        self.actors.append(self.plotter.add_mesh(l3_m, color="#eceff1", specular=0.45, specular_power=20, smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l3_m, color="#e2e8f0", specular=0.45, specular_power=20, smooth_shading=True))
 
         # 5. Link 4 (Ranne - ranne.stl): Industrial orange safety accent
         l4_f = MODELS_DIR / "link4.stl"
         if l4_f.is_file():
             l4_m = pv.read(str(l4_f))
+            # Bottom pivot hole at (0, -6.80, 0) translated to origin
+            l4_m = l4_m.translate((0.0, 6.80, 0.0), inplace=False)
             l4_m = l4_m.transform(mat_align, inplace=False)
             l4_m = l4_m.compute_normals(auto_orient_normals=True)
         else:
             l4_m = self._make_procedural_link4()
-        self.actors.append(self.plotter.add_mesh(l4_m, color="#e65100", specular=0.4, specular_power=20, smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l4_m, color="#ea580c", specular=0.4, specular_power=20, smooth_shading=True))
 
-        # 6. Link 5 (Tarttujan runkolevy - link5.stl): Anodized dark bracket
-        l5_f = MODELS_DIR / "link5.stl"
-        if l5_f.is_file():
-            l5_m = pv.read(str(l5_f))
-            l5_m = l5_m.translate((-l5_m.center[0], -l5_m.center[1], -l5_m.bounds[4]), inplace=False)
-            l5_m = l5_m.compute_normals(auto_orient_normals=True)
-        else:
-            l5_m = self._make_procedural_link5()
-        self.actors.append(self.plotter.add_mesh(l5_m, color="#212529", specular=0.3, specular_power=15, smooth_shading=True))
-
-        # 7. Gripper (Split into animated components: center mount, left finger, right finger)
+        # 6. Gripper Assembly (Tarttuja.stl - contains mount flange, servo, and animated claws)
         grip_f = MODELS_DIR / "gripper.stl"
         if grip_f.is_file():
             grip_m = pv.read(str(grip_f))
-            grip_m = grip_m.translate((-16.2, -46.3, -30.0), inplace=False)
+            grip_m = grip_m.translate((-16.5, -42.3, -39.1), inplace=False)
             grip_m = grip_m.rotate_x(-90, point=(0, 0, 0), inplace=False)
             grip_m = grip_m.compute_normals(auto_orient_normals=True)
 
@@ -174,26 +170,27 @@ class ArmVisualizer3D(QWidget):
 
             for b in bodies:
                 cx = b.center[0]
-                if cx < -5.0:
+                cz = b.center[2]
+                if cx < -15.0 and cz > 35.0:
                     left_poly = left_poly + b
-                elif cx > 5.0:
+                elif cx > 15.0 and cz > 35.0:
                     right_poly = right_poly + b
                 else:
                     base_poly = base_poly + b
 
-            self.gripper_base_actor = self.plotter.add_mesh(base_poly, color="#37474f", specular=0.4, smooth_shading=True)
-            self.gripper_left_actor = self.plotter.add_mesh(left_poly, color="#b0bec5", specular=0.6, specular_power=30, smooth_shading=True)
-            self.gripper_right_actor = self.plotter.add_mesh(right_poly, color="#b0bec5", specular=0.6, specular_power=30, smooth_shading=True)
+            self.gripper_base_actor = self.plotter.add_mesh(base_poly, color="#334155", specular=0.4, smooth_shading=True)
+            self.gripper_left_actor = self.plotter.add_mesh(left_poly, color="#94a3b8", specular=0.6, specular_power=30, smooth_shading=True)
+            self.gripper_right_actor = self.plotter.add_mesh(right_poly, color="#94a3b8", specular=0.6, specular_power=30, smooth_shading=True)
         else:
             grip_m = self._make_procedural_gripper()
-            self.gripper_base_actor = self.plotter.add_mesh(grip_m, color="#b0bec5", smooth_shading=True)
+            self.gripper_base_actor = self.plotter.add_mesh(grip_m, color="#94a3b8", smooth_shading=True)
 
         # TCP Coordinate Indicator Sphere
-        tcp_sphere = pv.Sphere(radius=7, center=(0, 0, 0))
+        tcp_sphere = pv.Sphere(radius=6, center=(0, 0, 0))
         self.tcp_actor = self.plotter.add_mesh(
             tcp_sphere,
             color="#00e5ff",
-            ambient=0.85,
+            ambient=0.9,
             render_points_as_spheres=True
         )
 
@@ -503,3 +500,35 @@ class ArmVisualizer3D(QWidget):
     def view_side(self) -> None:
         self.plotter.view_xz()
         self.plotter.render()
+
+    def load_workpiece(self, file_path: str) -> bool:
+        """Loads a CAD STL workpiece onto the robot workcell table for seam planning."""
+        try:
+            self.clear_workpiece()
+            mesh = pv.read(file_path)
+            # Position workpiece on workcell table at reachable position (X=260, Y=0, Z=0)
+            mesh = mesh.translate((-mesh.center[0] + 260.0, -mesh.center[1], -mesh.bounds[4]), inplace=False)
+            mesh = mesh.compute_normals(auto_orient_normals=True)
+            self.workpiece_actor = self.plotter.add_mesh(
+                mesh,
+                color="#64748b",
+                specular=0.5,
+                specular_power=20,
+                smooth_shading=True,
+                show_edges=True,
+                edge_color="#475569"
+            )
+            self.plotter.render()
+            return True
+        except Exception:
+            return False
+
+    def clear_workpiece(self) -> None:
+        """Removes the imported workpiece from the 3D scene."""
+        if self.workpiece_actor:
+            try:
+                self.plotter.remove_actor(self.workpiece_actor)
+            except Exception:
+                pass
+            self.workpiece_actor = None
+            self.plotter.render()

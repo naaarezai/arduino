@@ -121,11 +121,12 @@ class RobotKinematics:
         r5 = rot_z_matrix(j5 - math.pi / 2.0)
         t_link5 = t_wrist_flange @ r5
 
-        # Gripper base: Mounted on Link 5 (+18.2mm along tool Z)
-        t_gripper = t_link5 @ translation_matrix(0, 0, 18.2)
+        # Gripper base: Mounted on Link 5 flange
+        t_gripper = t_link5
 
-        # Gripper Tool Center Point (TCP): fingertip contact point (+103mm from gripper mount)
-        t_tcp = t_gripper @ translation_matrix(0, 0, 103.0)
+        # Gripper Tool Center Point (TCP): fingertip contact point
+        tool_reach = max(10.0, self.l3 - 45.0)
+        t_tcp = t_gripper @ translation_matrix(0, 0, tool_reach)
 
         # Extract TCP Cartesian coordinates
         tcp_x = float(t_tcp[0, 3])
@@ -269,6 +270,9 @@ class RobotKinematics:
         dy = p_end.tcp_y - p_start.tcp_y
         dz = p_end.tcp_z - p_start.tcp_z
         dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+        if dist < 0.001:
+            return [list(start_angles)]
 
         steps = max(2, min(80, int(math.ceil(dist / step_size_mm))))
         path: List[List[int]] = []

@@ -164,9 +164,20 @@ class SimulationControlPanel(QGroupBox):
         base_interval = 35
         self.timer.setInterval(max(10, int(base_interval / multiplier)))
 
+    def update_program_stats(self) -> None:
+        """Calculates estimated cycle time and displays summary."""
+        if not self.program.statements:
+            self.lbl_status.setText("Valmis simulaatioon (0 käskyä).")
+            return
+
+        current_angles = self.get_angles()
+        traj = self.program.generate_full_trajectory(current_angles, speed_multiplier=1.0)
+        est_seconds = len(traj) * 0.035
+        self.lbl_status.setText(f"Arvioitu sykliaika: {est_seconds:.1f} s | {len(self.program.statements)} käskyä | {len(traj)} interpolaatioaskelta")
+
     def play_simulation(self) -> None:
         if not self.program.statements:
-            self.lbl_status.setText("⚠️ Lisää ensin käskyjä Program-näkymässä!")
+            self.lbl_status.setText("MainRoutine on tyhjä — lisää käskyjä Program-näkymässä.")
             return
 
         if self.is_paused:
@@ -183,27 +194,28 @@ class SimulationControlPanel(QGroupBox):
         self._current_frame_idx = 0
         self.is_paused = False
         self.timer.start()
-        self.lbl_status.setText(f"Simuloidaan: {len(self._trajectory)} kehystä ({self.speed_multiplier:g}x)...")
+        est_seconds = len(self._trajectory) * 0.035 / self.speed_multiplier
+        self.lbl_status.setText(f"Simuloidaan: {len(self._trajectory)} kehystä (~{est_seconds:.1f} s, {self.speed_multiplier:g}x)...")
 
     def pause_simulation(self) -> None:
         if self.timer.isActive():
             self.timer.stop()
             self.is_paused = True
-            self.lbl_status.setText("⏸️ Simulaatio keskeytetty.")
+            self.lbl_status.setText("Simulaatio keskeytetty (Pause).")
 
     def stop_simulation(self) -> None:
         self.timer.stop()
         self.is_paused = False
         self._current_frame_idx = 0
         self.progress_bar.setValue(0)
-        self.lbl_status.setText("⏹️ Simulaatio pysäytetty.")
+        self.lbl_status.setText("Simulaatio pysäytetty (Stop).")
         if self.on_frame_tick:
             self.on_frame_tick(-1)
 
     def _on_tick(self) -> None:
         if self._current_frame_idx >= len(self._trajectory):
             self.stop_simulation()
-            self.lbl_status.setText("✓ Simulaatio valmis!")
+            self.lbl_status.setText("Simulaatiosykli valmis.")
             return
 
         frame = self._trajectory[self._current_frame_idx]
@@ -212,7 +224,7 @@ class SimulationControlPanel(QGroupBox):
         # Update progress and statement highlight
         prog_pct = int((self._current_frame_idx + 1) * 100 / len(self._trajectory))
         self.progress_bar.setValue(prog_pct)
-        welding_tag = " [🔥 HITSAUS]" if frame.is_welding else ""
+        welding_tag = " [SEAM ACTIVE]" if frame.is_welding else ""
         self.lbl_status.setText(f"Ajo: {frame.statement_label}{welding_tag} ({prog_pct}%)")
 
         if self.on_frame_tick:
@@ -222,7 +234,7 @@ class SimulationControlPanel(QGroupBox):
 
     def _execute_on_robot(self) -> None:
         if not self.program.statements:
-            self.lbl_status.setText("⚠️ Lisää ensin käskyjä ennen ajamista!")
+            self.lbl_status.setText("Käskyjä ei ole määritetty — opeta liikeradat ensin.")
             return
 
         current_angles = self.get_angles()

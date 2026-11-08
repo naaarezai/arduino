@@ -18,11 +18,11 @@ SERIAL_THROTTLE_MS: int = 35  # ~28 Hz update rate to prevent serial buffer over
 PACKET_HEADER: str = "<"
 PACKET_FOOTER: str = ">\n"
 
-# Kinematic Link Dimensions (in millimeters)
+# Kinematic Link Dimensions (in millimeters) - Calibrated to Inventor CAD models
 LINK_0_HEIGHT: float = 140.0  # Base height to Shoulder joint (J2)
-LINK_1_LENGTH: float = 200.0  # Shoulder to Elbow (J3)
-LINK_2_LENGTH: float = 200.0  # Elbow to Wrist Pitch (J4)
-LINK_3_LENGTH: float = 166.0  # Wrist Pitch to Gripper tip (J6)
+LINK_1_LENGTH: float = 213.4  # Shoulder to Elbow (J3) - arm1.stl pivot-to-pivot distance
+LINK_2_LENGTH: float = 213.4  # Elbow to Wrist Pitch (J4) - arm1.stl pivot-to-pivot distance
+LINK_3_LENGTH: float = 144.3  # Wrist Pitch to Gripper tip (J6) (45mm ranne flange + 99.3mm Tarttuja tip)
 
 # Joint Names and Limits
 JOINT_NAMES = [
