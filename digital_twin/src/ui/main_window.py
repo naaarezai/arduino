@@ -57,6 +57,10 @@ class MainWindow(QMainWindow):
         self._robot_stream_index: int = 0
         self._seam_point_a: Optional[Tuple[float, float, float]] = None
 
+        # Workpiece tracking
+        self._active_demo_fixture: Optional[str] = None
+        self._active_workpiece_stl: Optional[str] = None
+
         self._init_ui()
         self.kinematics.set_active_tool(self.visualizer_3d.active_tool)
         self._setup_shortcuts()
@@ -70,6 +74,8 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Space"), self, self._toggle_play_pause)
         QShortcut(QKeySequence("Ctrl+S"), self, self.statement_tree._save_program)
         QShortcut(QKeySequence("Ctrl+O"), self, self.statement_tree._load_program)
+        QShortcut(QKeySequence("Ctrl+Shift+S"), self, self._save_project)
+        QShortcut(QKeySequence("Ctrl+Shift+O"), self, self._load_project)
         QShortcut(QKeySequence("Delete"), self, self.statement_tree._delete_selected)
         QShortcut(QKeySequence("Ctrl+H"), self, lambda: self._apply_angles_to_arm([90, 90, 90, 90, 90, 40]))
         QShortcut(QKeySequence("Esc"), self, self._emergency_stop)
@@ -119,6 +125,31 @@ class MainWindow(QMainWindow):
 
         self.btn_tab_program.setChecked(True)
         ribbon_bar.addStretch()
+
+        # Project Save / Open
+        self.btn_save_proj = QPushButton("💾 Tallenna projekti")
+        self.btn_save_proj.setToolTip("Tallenna koko työtila (.project.json: ohjelma, työkalu, kappale) [Ctrl+Shift+S]")
+        self.btn_save_proj.setStyleSheet("""
+            QPushButton {
+                background: #1e3a5f; color: #60a5fa; font-weight: 600; font-size: 11px;
+                border: 1px solid #2563eb; border-radius: 3px; padding: 5px 12px;
+            }
+            QPushButton:hover { background: #2563eb; color: #ffffff; }
+        """)
+        self.btn_save_proj.clicked.connect(self._save_project)
+        ribbon_bar.addWidget(self.btn_save_proj)
+
+        self.btn_open_proj = QPushButton("📂 Avaa projekti")
+        self.btn_open_proj.setToolTip("Avaa aiemmin tallennettu projektitiedosto (.project.json) [Ctrl+Shift+O]")
+        self.btn_open_proj.setStyleSheet("""
+            QPushButton {
+                background: #252526; color: #cccccc; font-weight: 600; font-size: 11px;
+                border: 1px solid #3f3f46; border-radius: 3px; padding: 5px 12px;
+            }
+            QPushButton:hover { background: #2d2d30; color: #ffffff; }
+        """)
+        self.btn_open_proj.clicked.connect(self._load_project)
+        ribbon_bar.addWidget(self.btn_open_proj)
 
         # E-STOP Emergency Safety Button
         self.btn_estop = QPushButton("⛔ HÄTÄ-SEIS (Esc)")
@@ -464,6 +495,8 @@ class MainWindow(QMainWindow):
         if file_path:
             ok = self.visualizer_3d.load_workpiece(file_path)
             if ok:
+                self._active_demo_fixture = None
+                self._active_workpiece_stl = file_path
                 from pathlib import Path
                 self.status_bar.showMessage(f"CAD-kappale ladattu: {Path(file_path).name} (pöytäkoordinaatit X=260, Y=0, Z=0)", 5000)
             else:
@@ -612,6 +645,8 @@ class MainWindow(QMainWindow):
         """Loads built-in CAD workpiece fixture (V-groove plates, pipe joint, corner bracket)."""
         ok = self.visualizer_3d.load_demo_workpiece(fixture_name)
         if ok:
+            self._active_demo_fixture = fixture_name
+            self._active_workpiece_stl = None
             names = {
                 "WELD_PLATE": "V-saumalevyt (V-Groove Seam)",
                 "PIPE_JOINT": "Putkiliitos (Pipe T-Joint)",
@@ -626,7 +661,105 @@ class MainWindow(QMainWindow):
         if hasattr(self, "btn_2click_seam") and self.btn_2click_seam.isChecked():
             self.btn_2click_seam.setChecked(False)
         self.visualizer_3d.clear_workpiece()
+        self._active_demo_fixture = None
+        self._active_workpiece_stl = None
         self.status_bar.showMessage("Kappale poistettu 3D-työtilasta.", 3000)
+
+    def _save_project(self) -> None:
+        """Saves entire workcell state (program, tool TCP, workpiece CAD, poses) to .project.json."""
+        from pathlib import Path
+        from src.core.project_manager import export_project_data, save_project_to_file
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Tallenna työtilaprojekti",
+            f"{self.program.name}.project.json",
+            "Robot Project Files (*.project.json *.json);;All Files (*.*)"
+        )
+        if not path:
+            return
+
+        try:
+            active_tool = getattr(self.visualizer_3d, "active_tool", None)
+            cur_angles = self._get_current_sim_angles()
+            wp_pos = getattr(self.visualizer_3d, "workpiece_pos", [260.0, 0.0, 0.0])
+            wp_rot = getattr(self.visualizer_3d, "workpiece_rot_z", 0.0)
+
+            data = export_project_data(
+                program=self.program,
+                active_tool=active_tool,
+                demo_fixture=self._active_demo_fixture,
+                workpiece_stl=self._active_workpiece_stl,
+                workpiece_pos=wp_pos,
+                workpiece_rot_z=wp_rot,
+                current_angles=cur_angles,
+                project_name=Path(path).stem.replace(".project", "")
+            )
+            save_project_to_file(Path(path), data)
+            self.status_bar.showMessage(f"Projekti tallennettu: {Path(path).name}", 5000)
+            QMessageBox.information(self, "Tallennettu", f"Koko työtila tallennettu onnistuneesti tiedostoon:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Tallennusvirhe", f"Projektin tallennus epäonnistui:\n{e}")
+
+    def _load_project(self) -> None:
+        """Loads complete workcell state from a .project.json file."""
+        from pathlib import Path
+        from src.core.project_manager import load_project_from_file
+        from src.core.program import Statement
+        from src.core.tool_data import ToolProfile
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Avaa työtilaprojekti",
+            "",
+            "Robot Project Files (*.project.json *.json);;All Files (*.*)"
+        )
+        if not path:
+            return
+
+        try:
+            data = load_project_from_file(Path(path))
+
+            # 1. Load Program
+            prog_data = data.get("program", {})
+            self.program.name = prog_data.get("name", "MainRoutine")
+            self.program.statements = [Statement.from_dict(item) for item in prog_data.get("statements", [])]
+            self.program._target_counter = len(self.program.statements) + 1
+            self.statement_tree.refresh_tree()
+
+            # 2. Load Tool
+            tool_data = data.get("active_tool")
+            if tool_data:
+                tool = ToolProfile.from_dict(tool_data)
+                self._on_tool_applied(tool)
+
+            # 3. Load Workpiece
+            wp_data = data.get("workpiece", {})
+            demo_fixture = wp_data.get("demo_fixture")
+            stl_path = wp_data.get("stl_path")
+            wp_pos = wp_data.get("pos", [260.0, 0.0, 0.0])
+            wp_rot = wp_data.get("rot_z", 0.0)
+
+            if demo_fixture:
+                self._load_demo_fixture(demo_fixture)
+                self.visualizer_3d.set_workpiece_transform(wp_pos, wp_rot)
+            elif stl_path and Path(stl_path).exists():
+                self.visualizer_3d.load_workpiece(stl_path)
+                self._active_workpiece_stl = stl_path
+                self._active_demo_fixture = None
+                self.visualizer_3d.set_workpiece_transform(wp_pos, wp_rot)
+            else:
+                self._clear_workpiece()
+
+            # 4. Load Robot Posture
+            angles = data.get("current_angles")
+            if angles and len(angles) == 6:
+                self._apply_angles_to_arm(angles)
+
+            self.status_bar.showMessage(f"Projekti avattu: {Path(path).name}", 5000)
+            QMessageBox.information(self, "Projekti avattu", f"Työtila palautettu onnistuneesti tiedostosta:\n{Path(path).name}")
+        except Exception as e:
+            QMessageBox.critical(self, "Latausvirhe", f"Projektin avaaminen epäonnistui:\n{e}")
 
     def _open_workpiece_dialog(self) -> None:
         """Opens dialog to position and rotate the CAD workpiece on the workcell table."""

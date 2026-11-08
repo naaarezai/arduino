@@ -13,8 +13,10 @@ from src.ui.qt_compat import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTreeWidget, QTreeWidgetItem, QHeaderView, QGroupBox,
     QFileDialog, QMessageBox, Qt, QColor, QComboBox, QSpinBox,
-    QDialog, QGridLayout, QMenu, QAction, QShortcut, QKeySequence, QInputDialog
+    QDialog, QGridLayout, QMenu, QAction, QShortcut, QKeySequence, QInputDialog,
+    QTabWidget
 )
+from src.ui.code_preview_panel import CodePreviewPanel
 
 
 class WeldWizardDialog(QDialog):
@@ -83,6 +85,29 @@ class WeldWizardDialog(QDialog):
         self.spin_speed.setValue(40)
         grid.addWidget(self.spin_speed, 3, 1)
 
+        grid.addWidget(QLabel("Weave / Pendlaus:"), 4, 0)
+        self.combo_weave = QComboBox()
+        self.combo_weave.addItems(["Ei pendlausta (Suora LIN)", "Siksak (Zigzag)", "Sini (Sine wave)"])
+        grid.addWidget(self.combo_weave, 4, 1)
+
+        grid.addWidget(QLabel("Leveys / Amplitude (mm):"), 5, 0)
+        self.spin_amp = QSpinBox()
+        self.spin_amp.setRange(1, 15)
+        self.spin_amp.setValue(3)
+        grid.addWidget(self.spin_amp, 5, 1)
+
+        grid.addWidget(QLabel("Aallonpituus / Pitch (mm):"), 6, 0)
+        self.spin_pitch = QSpinBox()
+        self.spin_pitch.setRange(2, 20)
+        self.spin_pitch.setValue(6)
+        grid.addWidget(self.spin_pitch, 6, 1)
+
+        grid.addWidget(QLabel("Jätökulma / Drag Angle (°):"), 7, 0)
+        self.spin_drag = QSpinBox()
+        self.spin_drag.setRange(-25, 25)
+        self.spin_drag.setValue(10)
+        grid.addWidget(self.spin_drag, 7, 1)
+
         layout.addLayout(grid)
 
         # Action Buttons
@@ -92,7 +117,7 @@ class WeldWizardDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         btn_box.addWidget(btn_cancel)
 
-        btn_gen = QPushButton("Generate 5-Step Routine")
+        btn_gen = QPushButton("Generate Routine")
         btn_gen.setStyleSheet("background: #7c3aed; color: white; font-weight: bold; padding: 6px 14px; border-radius: 3px;")
         btn_gen.clicked.connect(self._generate)
         btn_box.addWidget(btn_gen)
@@ -113,26 +138,154 @@ class WeldWizardDialog(QDialog):
         elif direction == 4: dz = length
         elif direction == 5: dz = -length
 
-        # 1. Approach: p_start + (0, 0, app_h)
-        sol_app = self.kinematics.inverse_kinematics(p_start.tcp_x, p_start.tcp_y, p_start.tcp_z + app_h, p_start.pitch_deg, auto_adjust_pitch=True, current_angles=self.current_angles)
-        # 2. Touchdown: exact current taught pose
-        sol_start = list(self.current_angles)
-        # 3. End of seam: p_start + (dx, dy, dz)
-        sol_end = self.kinematics.inverse_kinematics(p_start.tcp_x + dx, p_start.tcp_y + dy, p_start.tcp_z + dz, p_start.pitch_deg, auto_adjust_pitch=True, current_angles=sol_start)
-        # 4. Retract: end of seam + app_h
-        sol_retract = self.kinematics.inverse_kinematics(p_start.tcp_x + dx, p_start.tcp_y + dy, p_start.tcp_z + dz + app_h, p_start.pitch_deg, auto_adjust_pitch=True, current_angles=sol_end or sol_start)
+        w_idx = self.combo_weave.currentIndex()
+        weave_type = "NONE" if w_idx == 0 else ("ZIGZAG" if w_idx == 1 else "SINE")
+        amp = float(self.spin_amp.value())
+        pitch = float(self.spin_pitch.value())
+        drag = float(self.spin_drag.value())
 
-        if not all([sol_app, sol_start, sol_end, sol_retract]):
-            QMessageBox.warning(self, "Ulottuvuusraja", "Osa lasketusta hitsausradasta on robotin työalueen ulkopuolella!\nKokeile pienempää saumapituutta tai toista suuntaa.")
+        p_end = (p_start.tcp_x + dx, p_start.tcp_y + dy, p_start.tcp_z + dz)
+        from src.core.weld_planner import generate_industrial_weld_sequence
+        stmts, err = generate_industrial_weld_sequence(
+            (p_start.tcp_x, p_start.tcp_y, p_start.tcp_z),
+            p_end,
+            kinematics=self.kinematics,
+            current_angles=self.current_angles,
+            approach_h=app_h,
+            speed_percent=speed,
+            weave_type=weave_type,
+            amplitude=amp,
+            pitch=pitch,
+            drag_angle_deg=drag
+        )
+        if err or not stmts:
+            QMessageBox.warning(self, "Ulottuvuusraja", f"Laskettu hitsausrata ylittää robotin ulottuvuusalueen:\n{err}\nKokeile pienempää saumapituutta tai toista suuntaa.")
             return
 
-        self.result_statements = [
-            ("PTP", sol_app, 100, f"Approach to seam (+{int(app_h)}mm)"),
-            ("LIN", sol_start, 60, "Touchdown at seam start (ARC ON)"),
-            ("LIN", sol_end, speed, f"Weld linear seam ({length:.0f}mm)"),
-            ("DELAY", 500, 0, "Crater fill dwell (ARC OFF)"),
-            ("LIN", sol_retract, 80, f"Retract above seam end (+{int(app_h)}mm)"),
-        ]
+        self.result_statements = []
+        for s in stmts:
+            if isinstance(s, DelayStatement):
+                self.result_statements.append(("DELAY", s.duration_ms, 0, s.comment))
+            elif isinstance(s, MotionStatement):
+                self.result_statements.append((s.statement_type, s.angles, s.speed_percent, s.comment))
+        self.accept()
+
+
+class MultiPassDialog(QDialog):
+    """
+    Multi-Pass Weld Generator dialog (Root, Fill, Cap passes).
+    """
+    def __init__(self, kinematics: RobotKinematics, current_angles: List[int], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Monipalkohitsaus (Multi-Pass Generator)")
+        self.resize(380, 320)
+        self.setStyleSheet("""
+            QDialog { background: #1e1e1e; color: #d4d4d4; }
+            QLabel { color: #cccccc; font-size: 11px; font-weight: 600; }
+            QSpinBox, QComboBox {
+                background: #252526; color: #ffffff; border: 1px solid #3f3f46;
+                border-radius: 3px; padding: 4px; font-size: 11px;
+            }
+        """)
+        self.kinematics = kinematics
+        self.current_angles = current_angles
+        self.result_statements = []
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        title = QLabel("🧬 Monipalkohitsauksen generaattori (Multi-Pass)")
+        title.setStyleSheet("font-weight: bold; font-size: 12px; color: #f43f5e;")
+        layout.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setSpacing(8)
+
+        grid.addWidget(QLabel("Sauman pituus (mm):"), 0, 0)
+        self.spin_len = QSpinBox()
+        self.spin_len.setRange(10, 250)
+        self.spin_len.setValue(60)
+        grid.addWidget(self.spin_len, 0, 1)
+
+        grid.addWidget(QLabel("Suunta:"), 1, 0)
+        self.combo_dir = QComboBox()
+        self.combo_dir.addItems([
+            "+X (Eteen / Forward)",
+            "-X (Taakse / Backward)",
+            "+Y (Vasen / Left)",
+            "-Y (Oikea / Right)",
+            "+Z (Pystysauma ylös / Up)",
+            "-Z (Pystysauma alas / Down)"
+        ])
+        grid.addWidget(self.combo_dir, 1, 1)
+
+        grid.addWidget(QLabel("Palkojen määrä:"), 2, 0)
+        self.combo_passes = QComboBox()
+        self.combo_passes.addItems(["3 Palkoa (Juuripalko, Täyttö, Pinta)", "2 Palkoa (Juuri, Pinta)"])
+        grid.addWidget(self.combo_passes, 2, 1)
+
+        grid.addWidget(QLabel("Sivusiirtymä / Offset (mm):"), 3, 0)
+        self.spin_lat = QSpinBox()
+        self.spin_lat.setRange(1, 10)
+        self.spin_lat.setValue(3)
+        grid.addWidget(self.spin_lat, 3, 1)
+
+        grid.addWidget(QLabel("Korkeussiirtymä / Z-Step (mm):"), 4, 0)
+        self.spin_vert = QSpinBox()
+        self.spin_vert.setRange(1, 8)
+        self.spin_vert.setValue(2)
+        grid.addWidget(self.spin_vert, 4, 1)
+
+        layout.addLayout(grid)
+
+        btn_box = QHBoxLayout()
+        btn_cancel = QPushButton("Peruuta")
+        btn_cancel.setStyleSheet("background: #2d2d30; color: #cccccc; padding: 6px 12px; border-radius: 3px;")
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+
+        btn_gen = QPushButton("Generoi Monipalko")
+        btn_gen.setStyleSheet("background: #be185d; color: white; font-weight: bold; padding: 6px 14px; border-radius: 3px;")
+        btn_gen.clicked.connect(self._generate)
+        btn_box.addWidget(btn_gen)
+        layout.addLayout(btn_box)
+
+    def _generate(self):
+        p_start = self.kinematics.forward_kinematics([float(a) for a in self.current_angles])
+        length = float(self.spin_len.value())
+        direction = self.combo_dir.currentIndex()
+
+        dx, dy, dz = 0.0, 0.0, 0.0
+        if direction == 0:   dx = length
+        elif direction == 1: dx = -length
+        elif direction == 2: dy = length
+        elif direction == 3: dy = -length
+        elif direction == 4: dz = length
+        elif direction == 5: dz = -length
+
+        num_p = 3 if self.combo_passes.currentIndex() == 0 else 2
+        p_end = (p_start.tcp_x + dx, p_start.tcp_y + dy, p_start.tcp_z + dz)
+
+        from src.core.weld_planner import generate_multipass_routine
+        stmts, err = generate_multipass_routine(
+            (p_start.tcp_x, p_start.tcp_y, p_start.tcp_z),
+            p_end,
+            kinematics=self.kinematics,
+            current_angles=self.current_angles,
+            num_passes=num_p,
+            lateral_offset_mm=float(self.spin_lat.value()),
+            vertical_offset_mm=float(self.spin_vert.value())
+        )
+        if err or not stmts:
+            QMessageBox.warning(self, "Ulottuvuusraja", f"Monipalkorata ylittää robotin ulottuvuusalueen:\n{err}")
+            return
+
+        self.result_statements = []
+        for s in stmts:
+            if isinstance(s, DelayStatement):
+                self.result_statements.append(("DELAY", s.duration_ms, 0, s.comment))
+            elif isinstance(s, MotionStatement):
+                self.result_statements.append((s.statement_type, s.angles, s.speed_percent, s.comment))
         self.accept()
 
 
@@ -248,10 +401,51 @@ class StatementTreePanel(QGroupBox):
             self.btn_2click_seam.clicked.connect(self.on_trigger_2click_seam)
         tb_layout.addWidget(self.btn_2click_seam)
 
+        self.btn_multipass = QPushButton("🧬 Multi-Pass")
+        self.btn_multipass.setStyleSheet("""
+            QPushButton {
+                background: #831843; color: white; font-weight: 600; font-size: 11px;
+                border: 1px solid #be185d; border-radius: 3px; padding: 5px 9px;
+            }
+            QPushButton:hover { background: #be185d; }
+        """)
+        self.btn_multipass.setToolTip("Generoi monipalkohitsaus (Root, Fill, Cap passes)")
+        self.btn_multipass.clicked.connect(self._open_multipass)
+        tb_layout.addWidget(self.btn_multipass)
+
+        self.btn_reverse = QPushButton("🔄 Käännä")
+        self.btn_reverse.setStyleSheet("""
+            QPushButton {
+                background: #1e3a8a; color: white; font-weight: 600; font-size: 11px;
+                border: 1px solid #2563eb; border-radius: 3px; padding: 5px 9px;
+            }
+            QPushButton:hover { background: #2563eb; }
+        """)
+        self.btn_reverse.setToolTip("Käännä hitsaussauman suunta päinvastaiseksi (alku ↔ loppu)")
+        self.btn_reverse.clicked.connect(self._reverse_program)
+        tb_layout.addWidget(self.btn_reverse)
+
         tb_layout.addStretch()
         layout.addLayout(tb_layout)
 
-        # 2. Main Statement Tree
+        # 2. Main Tabbed Container (Tree + Live Code Preview)
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane { border: 1px solid #333333; background: #181818; }
+            QTabBar::tab {
+                background: #252526; color: #858585; padding: 5px 12px;
+                border: 1px solid #2d2d30; border-bottom: none; font-size: 11px; font-weight: 600;
+            }
+            QTabBar::tab:selected { background: #181818; color: #ffffff; border-top: 2px solid #007acc; }
+        """)
+
+        # Tab 0: Tree + Action Toolbar Container
+        tree_tab = QWidget()
+        tree_tab_layout = QVBoxLayout(tree_tab)
+        tree_tab_layout.setContentsMargins(0, 4, 0, 0)
+        tree_tab_layout.setSpacing(6)
+
+        # Main Statement Tree
         self.tree = QTreeWidget()
         self.tree.setColumnCount(3)
         self.tree.setHeaderLabels(["Statement", "Coordinates & Joints", "Speed / Duration"])
@@ -278,7 +472,7 @@ class StatementTreePanel(QGroupBox):
         self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
-        layout.addWidget(self.tree, 1)
+        tree_tab_layout.addWidget(self.tree, 1)
 
         # 3. Action Toolbar (Teach, Up, Down, Delete, Undo/Redo, Save/Load)
         act_layout = QHBoxLayout()
@@ -360,7 +554,16 @@ class StatementTreePanel(QGroupBox):
         self.btn_export.clicked.connect(self._export_code)
         act_layout.addWidget(self.btn_export)
 
-        layout.addLayout(act_layout)
+        tree_tab_layout.addLayout(act_layout)
+
+        # Tab 1: Live Code Preview
+        self.code_panel = CodePreviewPanel(self.program)
+
+        self.tab_widget.addTab(tree_tab, "📋 Ohjelmapuu (Tree)")
+        self.tab_widget.addTab(self.code_panel, "💻 Koodiesikatselu (Live Code)")
+        self.tab_widget.currentChanged.connect(lambda idx: self.code_panel.refresh_code() if idx == 1 else None)
+
+        layout.addWidget(self.tab_widget, 1)
 
     def refresh_tree(self) -> None:
         """Rebuilds the Statement Tree representing MainRoutine."""
@@ -401,8 +604,8 @@ class StatementTreePanel(QGroupBox):
                 item.setText(1, stmt.comment)
                 item.setText(2, f"{stmt.duration_ms} ms")
 
-        if self.on_program_changed:
-            self.on_program_changed()
+        if hasattr(self, "code_panel"):
+            self.code_panel.refresh_code()
 
         if self.on_program_changed:
             self.on_program_changed()
@@ -636,12 +839,37 @@ class StatementTreePanel(QGroupBox):
         angles = self.get_current_angles()
         dlg = WeldWizardDialog(self.program.kinematics, angles, self)
         if dlg.exec_():
+            self._push_undo()
             for st_type, data, speed, comment in dlg.result_statements:
                 if st_type == "DELAY":
                     self.program.add_delay(duration_ms=data, comment=comment)
                 else:
                     self.program.add_motion(data, motion_type=st_type, speed_percent=speed, comment=comment)
             self.refresh_tree()
+
+    def _open_multipass(self) -> None:
+        """Opens Multi-Pass Generator dialog (Root, Fill, Cap passes)."""
+        angles = self.get_current_angles()
+        dlg = MultiPassDialog(self.program.kinematics, angles, self)
+        if dlg.exec_():
+            self._push_undo()
+            for st_type, data, speed, comment in dlg.result_statements:
+                if st_type == "DELAY":
+                    self.program.add_delay(duration_ms=data, comment=comment)
+                else:
+                    self.program.add_motion(data, motion_type=st_type, speed_percent=speed, comment=comment)
+            self.refresh_tree()
+
+    def _reverse_program(self) -> None:
+        """Reverses the order and trajectory direction of welding statements in the program."""
+        if not self.program.statements:
+            QMessageBox.information(self, "Käännä sauma", "Ohjelmassa ei ole käskyjä käännettäväksi.")
+            return
+        from src.core.weld_planner import reverse_seam_statements
+        self._push_undo()
+        self.program.statements = reverse_seam_statements(self.program.statements)
+        self.refresh_tree()
+        QMessageBox.information(self, "Sauma käännetty", "Hitsausradan suunta on käännetty päinvastaiseksi (alku ↔ loppu).")
 
     def _save_program(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Tallenna OLP-ohjelma", "", "JSON-ohjelmat (*.json)")

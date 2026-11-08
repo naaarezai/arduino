@@ -19,6 +19,11 @@ from src.core.calibration import CalibrationManager
 from src.core.post_processor import RobotPostProcessor
 from src.core.program import RobotProgram, MotionStatement, GripperStatement, DelayStatement
 from src.core.tool_data import ToolProfile, ToolManager, TOOL_PRESETS
+from src.core.weld_planner import (
+    generate_weave_path, generate_industrial_weld_sequence,
+    generate_multipass_routine, reverse_seam_statements
+)
+from src.core.project_manager import export_project_data, save_project_to_file, load_project_from_file
 
 
 class TestKinematics(unittest.TestCase):
@@ -234,6 +239,145 @@ class TestUXAndSafety(unittest.TestCase):
             self.assertIn("device", p)
             self.assertIn("description", p)
             self.assertIn("is_arduino", p)
+
+
+class TestWeldPlanner(unittest.TestCase):
+    def setUp(self):
+        self.kin = RobotKinematics(
+            l0=LINK_0_HEIGHT,
+            l1=LINK_1_LENGTH,
+            l2=LINK_2_LENGTH,
+            l3=LINK_3_LENGTH
+        )
+        self.cur_angles = [64, 104, 180, 146, 80, 52]
+
+    def test_generate_weave_path_zigzag(self):
+        p_start = (200.0, -30.0, 50.0)
+        p_end = (200.0, 30.0, 50.0)
+        pts = generate_weave_path(p_start, p_end, amplitude=4.0, pitch=6.0, weave_type="ZIGZAG")
+        self.assertGreater(len(pts), 5)
+        # First and last points should match start and end
+        self.assertAlmostEqual(pts[0][0], p_start[0], places=1)
+        self.assertAlmostEqual(pts[0][1], p_start[1], places=1)
+        self.assertAlmostEqual(pts[-1][0], p_end[0], places=1)
+        self.assertAlmostEqual(pts[-1][1], p_end[1], places=1)
+        # Check transverse deflection
+        x_offsets = [abs(pt[0] - 200.0) for pt in pts[1:-1]]
+        self.assertTrue(any(x > 1.0 for x in x_offsets))
+
+    def test_generate_weave_path_sine(self):
+        p_start = (200.0, 0.0, 50.0)
+        p_end = (260.0, 0.0, 50.0)
+        pts = generate_weave_path(p_start, p_end, amplitude=3.0, pitch=8.0, weave_type="SINE")
+        self.assertGreater(len(pts), 5)
+        self.assertAlmostEqual(pts[0][1], 0.0, places=2)
+        self.assertAlmostEqual(pts[-1][1], 0.0, places=2)
+
+    def test_generate_industrial_weld_sequence(self):
+        p_start = (220.0, -25.0, 60.0)
+        p_end = (220.0, 25.0, 60.0)
+        stmts, err = generate_industrial_weld_sequence(
+            p_start, p_end,
+            kinematics=self.kin,
+            current_angles=self.cur_angles,
+            approach_h=20.0,
+            weave_type="ZIGZAG",
+            amplitude=3.0,
+            pitch=6.0,
+            drag_angle_deg=10.0
+        )
+        self.assertIsNone(err)
+        self.assertIsNotNone(stmts)
+        self.assertGreater(len(stmts), 5)
+        # First statement is PTP approach
+        self.assertEqual(stmts[0].statement_type, "PTP")
+        self.assertIn("Lähestyminen", stmts[0].comment)
+        # Second statement is Touchdown LIN
+        self.assertEqual(stmts[1].statement_type, "LIN")
+        self.assertIn("ARC ON", stmts[1].comment)
+        # Penultimate statement is Delay
+        self.assertIsInstance(stmts[-2], DelayStatement)
+        # Last statement is Retract LIN
+        self.assertEqual(stmts[-1].statement_type, "LIN")
+        self.assertIn("Nosto", stmts[-1].comment)
+
+    def test_generate_multipass_routine(self):
+        p_start = (210.0, -20.0, 55.0)
+        p_end = (210.0, 20.0, 55.0)
+        stmts, err = generate_multipass_routine(
+            p_start, p_end,
+            kinematics=self.kin,
+            current_angles=self.cur_angles,
+            num_passes=3,
+            lateral_offset_mm=2.5,
+            vertical_offset_mm=1.5
+        )
+        self.assertIsNone(err)
+        self.assertIsNotNone(stmts)
+        # 3 passes x 5 statements = 15 statements
+        self.assertEqual(len(stmts), 15)
+        self.assertTrue(any("Juuripalko" in s.comment for s in stmts))
+        self.assertTrue(any("Täyttöpalko" in s.comment for s in stmts))
+        self.assertTrue(any("Pintapalko" in s.comment for s in stmts))
+
+    def test_reverse_seam_statements(self):
+        p_start = (210.0, -20.0, 55.0)
+        p_end = (210.0, 20.0, 55.0)
+        stmts, err = generate_industrial_weld_sequence(
+            p_start, p_end,
+            kinematics=self.kin,
+            current_angles=self.cur_angles,
+            approach_h=20.0,
+            weave_type="NONE"
+        )
+        self.assertIsNone(err)
+        rev = reverse_seam_statements(stmts)
+        self.assertEqual(len(rev), len(stmts))
+        self.assertEqual(rev[0].statement_type, "PTP")
+        self.assertIn("Lähestyminen (Käännetty", rev[0].comment)
+        self.assertEqual(rev[-1].statement_type, "LIN")
+        self.assertIn("Nosto (Käännetty", rev[-1].comment)
+
+
+class TestProjectManager(unittest.TestCase):
+    def test_export_and_save_load(self):
+        import tempfile
+        kin = RobotKinematics()
+        prog = RobotProgram(kinematics=kin, name="TestWeldSeam")
+        prog.add_motion([90, 80, 110, 90, 90, 40], motion_type="PTP", comment="Approach")
+        prog.add_motion([90, 100, 120, 90, 90, 40], motion_type="LIN", comment="Weld")
+        prog.add_delay(500, comment="Crater")
+
+        torch = TOOL_PRESETS["WELDING_TORCH"]
+
+        data = export_project_data(
+            program=prog,
+            active_tool=torch,
+            demo_fixture="CORNER_BRACKET",
+            workpiece_stl=None,
+            workpiece_pos=[260.0, 10.0, 0.0],
+            workpiece_rot_z=45.0,
+            current_angles=[90, 80, 110, 90, 90, 40],
+            project_name="TestProject"
+        )
+        self.assertEqual(data["version"], "1.0")
+        self.assertEqual(len(data["program"]["statements"]), 3)
+        self.assertEqual(data["active_tool"]["tool_type"], "WELDING_TORCH")
+        self.assertEqual(data["workpiece"]["demo_fixture"], "CORNER_BRACKET")
+        self.assertEqual(data["workpiece"]["rot_z"], 45.0)
+
+        with tempfile.NamedTemporaryFile(suffix=".project.json", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+
+        try:
+            save_project_to_file(tmp_path, data)
+            loaded = load_project_from_file(tmp_path)
+            self.assertEqual(loaded["project_name"], "TestProject")
+            self.assertEqual(loaded["workpiece"]["demo_fixture"], "CORNER_BRACKET")
+            self.assertEqual(len(loaded["program"]["statements"]), 3)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
 
 if __name__ == "__main__":
