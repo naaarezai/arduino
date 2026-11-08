@@ -226,21 +226,48 @@ class RobotKinematics:
                         roll_deg: float,
                         gripper_deg: float,
                         current_angles: Optional[List[int]] = None) -> Optional[List[int]]:
-        """Core analytical IK for a 3-link planar arm with turntable base."""
+        """Core analytical IK for a 3-link planar arm with turntable base and 6-DOF tool offset."""
+        # Tool offset parameters (6-DOF EOAT support)
+        tool_x = self.active_tool.tcp_x if self.active_tool else 0.0
+        tool_y = self.active_tool.tcp_y if self.active_tool else 0.0
+        tool_z = self.active_tool.tcp_z if self.active_tool else 99.3
+        flange_l = 50.0  # Distance along Z from wrist pitch joint to tool mounting face
+
+        # Resolve tool offset in flange frame accounting for roll (J5)
+        j5_rad = math.radians(roll_deg - 90.0)
+        tx = tool_x * math.cos(j5_rad) - tool_y * math.sin(j5_rad)
+        ty = tool_x * math.sin(j5_rad) + tool_y * math.cos(j5_rad)
+        tz = tool_z
+
         # 1. Turntable base (J1)
         r_target = math.sqrt(x * x + y * y)
         if r_target < 0.001:
             j1 = 90.0
         else:
-            j1 = 90.0 + math.degrees(math.atan2(y, x))
+            phi = math.atan2(y, x)
+            if abs(ty) > 0.001 and r_target > abs(ty):
+                d_phi = math.asin(max(-1.0, min(1.0, ty / r_target)))
+                j1 = 90.0 + math.degrees(phi - d_phi)
+            else:
+                j1 = 90.0 + math.degrees(phi)
 
         if not (0.0 <= j1 <= 180.0):
             return None
 
-        # 2. Wrist Center Position
+        # Effective radius in the vertical arm pitch plane
+        r_arm = math.sqrt(max(0.0, r_target * r_target - ty * ty))
+
+        # 2. Wrist Joint Center Position (wr, wz)
         tool_angle_rad = math.radians(90.0 - pitch_deg)
-        wr = r_target - self.l3 * math.sin(tool_angle_rad)
-        wz = z - self.l0 - self.l3 * math.cos(tool_angle_rad)
+        st = math.sin(tool_angle_rad)
+        ct = math.cos(tool_angle_rad)
+
+        # Tool vector components in arm pitch plane
+        dr = tx * ct + (flange_l + tz) * st
+        dz = -tx * st + (flange_l + tz) * ct
+
+        wr = r_arm - dr
+        wz = z - self.l0 - dz
 
         dist_sq = wr * wr + wz * wz
         dist = math.sqrt(dist_sq)

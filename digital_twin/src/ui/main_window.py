@@ -693,10 +693,11 @@ class MainWindow(QMainWindow):
     def _on_surface_snapped(self, x: float, y: float, z: float) -> None:
         """Solves IK and moves the robot arm to touch the clicked 3D surface point."""
         cur_angles = self._get_current_sim_angles()
+        cur_pose = self.kinematics.forward_kinematics([float(a) for a in cur_angles])
         sol, actual = self.kinematics.solve_ik_clamped(
             x, y, z,
             current_angles=cur_angles,
-            preferred_pitch=-60.0
+            preferred_pitch=cur_pose.pitch_deg
         )
         if sol is not None:
             self._apply_angles_to_arm(sol)
@@ -774,12 +775,14 @@ class MainWindow(QMainWindow):
             return
 
         cur_angles = self._get_current_sim_angles()
+        cur_pose = self.kinematics.forward_kinematics([float(a) for a in cur_angles])
+        pref_pitch = cur_pose.pitch_deg
         app_h = 25.0
 
-        sol_app, _ = self.kinematics.solve_ik_clamped(xA, yA, zA + app_h, current_angles=cur_angles, preferred_pitch=-60.0)
-        sol_start, _ = self.kinematics.solve_ik_clamped(xA, yA, zA, current_angles=sol_app or cur_angles, preferred_pitch=-60.0)
-        sol_end, _ = self.kinematics.solve_ik_clamped(xB, yB, zB, current_angles=sol_start or cur_angles, preferred_pitch=-60.0)
-        sol_retract, _ = self.kinematics.solve_ik_clamped(xB, yB, zB + app_h, current_angles=sol_end or cur_angles, preferred_pitch=-60.0)
+        sol_app, _ = self.kinematics.solve_ik_clamped(xA, yA, zA + app_h, current_angles=cur_angles, preferred_pitch=pref_pitch)
+        sol_start, _ = self.kinematics.solve_ik_clamped(xA, yA, zA, current_angles=sol_app or cur_angles, preferred_pitch=pref_pitch)
+        sol_end, _ = self.kinematics.solve_ik_clamped(xB, yB, zB, current_angles=sol_start or cur_angles, preferred_pitch=pref_pitch)
+        sol_retract, _ = self.kinematics.solve_ik_clamped(xB, yB, zB + app_h, current_angles=sol_end or cur_angles, preferred_pitch=pref_pitch)
 
         if not all([sol_app, sol_start, sol_end, sol_retract]):
             QMessageBox.warning(

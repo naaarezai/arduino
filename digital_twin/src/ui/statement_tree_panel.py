@@ -61,13 +61,20 @@ class WeldWizardDialog(QDialog):
 
         grid.addWidget(QLabel("Direction:"), 1, 0)
         self.combo_dir = QComboBox()
-        self.combo_dir.addItems(["+X (Forward)", "-X (Backward)", "+Y (Left)", "-Y (Right)"])
+        self.combo_dir.addItems([
+            "+X (Eteen / Forward)",
+            "-X (Taakse / Backward)",
+            "+Y (Vasen / Left)",
+            "-Y (Oikea / Right)",
+            "+Z (Pystysauma ylös / Up)",
+            "-Z (Pystysauma alas / Down)"
+        ])
         grid.addWidget(self.combo_dir, 1, 1)
 
         grid.addWidget(QLabel("Approach Height (mm):"), 2, 0)
         self.spin_approach = QSpinBox()
         self.spin_approach.setRange(10, 100)
-        self.spin_approach.setValue(30)
+        self.spin_approach.setValue(25)
         grid.addWidget(self.spin_approach, 2, 1)
 
         grid.addWidget(QLabel("Weld Speed (%):"), 3, 0)
@@ -98,31 +105,33 @@ class WeldWizardDialog(QDialog):
         speed = self.spin_speed.value()
         direction = self.combo_dir.currentIndex()
 
-        dx, dy = 0.0, 0.0
+        dx, dy, dz = 0.0, 0.0, 0.0
         if direction == 0:   dx = length
         elif direction == 1: dx = -length
         elif direction == 2: dy = length
         elif direction == 3: dy = -length
+        elif direction == 4: dz = length
+        elif direction == 5: dz = -length
 
         # 1. Approach: p_start + (0, 0, app_h)
-        sol_app = self.kinematics.inverse_kinematics(p_start.tcp_x, p_start.tcp_y, p_start.tcp_z + app_h, p_start.pitch_deg, auto_adjust_pitch=True)
-        # 2. Touchdown: p_start
-        sol_start = self.kinematics.inverse_kinematics(p_start.tcp_x, p_start.tcp_y, p_start.tcp_z, p_start.pitch_deg, auto_adjust_pitch=True)
-        # 3. End of seam: p_start + (dx, dy, 0)
-        sol_end = self.kinematics.inverse_kinematics(p_start.tcp_x + dx, p_start.tcp_y + dy, p_start.tcp_z, p_start.pitch_deg, auto_adjust_pitch=True)
-        # 4. Retract: p_start + (dx, dy, app_h)
-        sol_retract = self.kinematics.inverse_kinematics(p_start.tcp_x + dx, p_start.tcp_y + dy, p_start.tcp_z + app_h, p_start.pitch_deg, auto_adjust_pitch=True)
+        sol_app = self.kinematics.inverse_kinematics(p_start.tcp_x, p_start.tcp_y, p_start.tcp_z + app_h, p_start.pitch_deg, auto_adjust_pitch=True, current_angles=self.current_angles)
+        # 2. Touchdown: exact current taught pose
+        sol_start = list(self.current_angles)
+        # 3. End of seam: p_start + (dx, dy, dz)
+        sol_end = self.kinematics.inverse_kinematics(p_start.tcp_x + dx, p_start.tcp_y + dy, p_start.tcp_z + dz, p_start.pitch_deg, auto_adjust_pitch=True, current_angles=sol_start)
+        # 4. Retract: end of seam + app_h
+        sol_retract = self.kinematics.inverse_kinematics(p_start.tcp_x + dx, p_start.tcp_y + dy, p_start.tcp_z + dz + app_h, p_start.pitch_deg, auto_adjust_pitch=True, current_angles=sol_end or sol_start)
 
         if not all([sol_app, sol_start, sol_end, sol_retract]):
-            QMessageBox.warning(self, "Ulottuvuusraja", "Osa lasketusta hitsausradasta on robotin työalueen ulkopuolella!\nKokeile pienempää saumapituutta tai eri suuntaa.")
+            QMessageBox.warning(self, "Ulottuvuusraja", "Osa lasketusta hitsausradasta on robotin työalueen ulkopuolella!\nKokeile pienempää saumapituutta tai toista suuntaa.")
             return
 
         self.result_statements = [
-            ("PTP", sol_app, 100, "Approach to seam start"),
-            ("LIN", sol_start, 60, "Touchdown at seam start"),
-            ("LIN", sol_end, speed, "Weld linear seam"),
-            ("DELAY", 500, 0, "Crater fill dwell"),
-            ("LIN", sol_retract, 80, "Retract above seam end"),
+            ("PTP", sol_app, 100, f"Approach to seam (+{int(app_h)}mm)"),
+            ("LIN", sol_start, 60, "Touchdown at seam start (ARC ON)"),
+            ("LIN", sol_end, speed, f"Weld linear seam ({length:.0f}mm)"),
+            ("DELAY", 500, 0, "Crater fill dwell (ARC OFF)"),
+            ("LIN", sol_retract, 80, f"Retract above seam end (+{int(app_h)}mm)"),
         ]
         self.accept()
 

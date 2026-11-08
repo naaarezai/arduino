@@ -159,6 +159,20 @@ class TestWorkpieceAndWelding(unittest.TestCase):
     def setUp(self):
         self.kin = RobotKinematics()
 
+    def test_welding_torch_ik_accuracy(self):
+        """Verifies that inverse kinematics with 45° offset welding torch has 0.0 mm TCP error."""
+        torch = TOOL_PRESETS["WELDING_TORCH"]
+        self.kin.set_active_tool(torch)
+        cur = [64, 104, 180, 146, 90, 52]
+        pose_orig = self.kin.forward_kinematics(cur)
+        tgt_x, tgt_y, tgt_z = pose_orig.tcp_x, pose_orig.tcp_y, pose_orig.tcp_z
+
+        sol, reached = self.kin.solve_ik_clamped(tgt_x, tgt_y, tgt_z, current_angles=cur)
+        self.assertIsNotNone(sol)
+        pose_sol = self.kin.forward_kinematics(sol)
+        error_dist = math.sqrt((pose_sol.tcp_x - tgt_x)**2 + (pose_sol.tcp_y - tgt_y)**2 + (pose_sol.tcp_z - tgt_z)**2)
+        self.assertLess(error_dist, 0.01, f"Welding torch TCP error must be < 0.01 mm, got {error_dist:.4f} mm")
+
     def test_2click_seam_kinematics(self):
         """Verifies mathematical correctness and reachability of 2-click welding sequences."""
         xA, yA, zA = 240.0, -30.0, 20.0

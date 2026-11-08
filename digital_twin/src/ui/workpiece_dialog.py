@@ -246,3 +246,4 @@ class WorkpieceTransformDialog(QDialog):
         if self.on_clear:
             self.on_clear()
         self.accept()
+
