@@ -117,12 +117,12 @@ class RobotKinematics:
         r4 = rot_y_matrix(j4 - math.pi / 2.0)
         t_link4 = t_wrist_joint @ r4
 
-        # Link 5 (Wrist roll): Rotates around local Z tool axis by (J5 - 90°)
+        # Link 5 (Wrist roll): Mounts on Link 4 and rotates around tool Z axis by (J5 - 90°)
         r5 = rot_z_matrix(j5 - math.pi / 2.0)
-        t_link5 = t_link4 @ r5
+        t_link5 = t_link4 @ translation_matrix(0, 0, 50.0) @ r5
 
-        # Gripper (Tool Center Point TCP) is at distance L3 along tool axis
-        t_tcp = t_link5 @ translation_matrix(0, 0, self.l3)
+        # Gripper tool frame (TCP): extends to finger tips
+        t_tcp = t_link5 @ translation_matrix(0, 0, self.l3 - 50.0)
 
         # Extract TCP Cartesian coordinates
         tcp_x = float(t_tcp[0, 3])
@@ -149,3 +149,4 @@ class RobotKinematics:
                 t_tcp
             ]
         )
+

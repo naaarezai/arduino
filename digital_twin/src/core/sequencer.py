@@ -72,3 +72,4 @@ class Sequencer:
             int(round(s + (e - s) * t))
             for s, e in zip(start_angles, end_angles)
         ]
+

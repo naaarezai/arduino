@@ -194,3 +194,4 @@ class SliderPanel(QGroupBox):
             self.spinboxes[i].setValue(val)
         self._block_signals = False
         self._emit_angles()
+

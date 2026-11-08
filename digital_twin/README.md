@@ -85,3 +85,4 @@ digital_twin/
 ├── requirements.txt          # Riippuvuudet
 └── README.md                 # Tämä ohje
 ```
+

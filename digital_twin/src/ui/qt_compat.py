@@ -32,3 +32,4 @@ except Exception as e:
         QMessageBox, QFileDialog, QFrame, QCheckBox
     )
     from PyQt6.QtGui import QColor, QFont, QIcon, QPalette
+

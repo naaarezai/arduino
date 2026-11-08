@@ -217,3 +217,4 @@ class SequencerPanel(QGroupBox):
             from pathlib import Path
             self.sequencer.load_from_json(Path(path))
             self._refresh_table()
+

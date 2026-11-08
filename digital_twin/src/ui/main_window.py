@@ -203,3 +203,4 @@ class MainWindow(QMainWindow):
         """Ensures serial thread terminates gracefully when window closes."""
         self.serial_worker.disconnect_serial("Sovellus suljettiin")
         event.accept()
+

@@ -58,3 +58,4 @@ STL_FILES = {
     "link5": "link5.stl",
     "gripper": "gripper.stl",
 }
+

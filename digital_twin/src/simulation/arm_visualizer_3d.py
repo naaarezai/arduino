@@ -82,6 +82,22 @@ class ArmVisualizer3D(QWidget):
             if stl_path.is_file() and stl_path.stat().st_size > 0:
                 try:
                     mesh = pv.read(str(stl_path))
+                    # CAD orientation & origin alignment calibration
+                    if name == "base":
+                        mesh = mesh.translate((-mesh.center[0], -mesh.center[1], -mesh.bounds[4]), inplace=False)
+                    elif name == "link1":
+                        mesh = mesh.translate((-mesh.center[0], -mesh.center[1], 100.0), inplace=False)
+                    elif name in ("link2", "link3"):
+                        mesh = mesh.rotate_x(90, point=(0, 0, 0), inplace=False)
+                    elif name == "link4":
+                        mesh = mesh.rotate_x(90, point=(0, 0, 0), inplace=False)
+                    elif name == "link5":
+                        mesh = mesh.translate((-mesh.center[0], -mesh.center[1], -mesh.bounds[4]), inplace=False)
+                    elif name == "gripper":
+                        mesh = mesh.translate((-mesh.center[0], -mesh.bounds[3], -mesh.center[2]), inplace=False)
+                        mesh = mesh.rotate_x(-90, point=(0, 0, 0), inplace=False)
+                        mesh = mesh.translate((0, 0, 15.0), inplace=False)
+
                     self.using_stl_map[name] = True
                 except Exception:
                     mesh = procedural_fn()
@@ -197,8 +213,8 @@ class ArmVisualizer3D(QWidget):
     def reset_camera(self) -> None:
         """Positions camera in an optimal isometric angle."""
         self.plotter.camera_position = [
-            (650.0, -650.0, 550.0),  # Eye position
-            (0.0, 0.0, 180.0),       # Focal point (middle of arm)
+            (950.0, -950.0, 650.0),  # Eye position
+            (0.0, 0.0, 280.0),       # Focal point (middle of arm)
             (0.0, 0.0, 1.0)          # Up vector
         ]
         self.plotter.reset_camera_clipping_range()
@@ -211,3 +227,4 @@ class ArmVisualizer3D(QWidget):
     def view_side(self) -> None:
         self.plotter.view_xz()
         self.plotter.render()
+

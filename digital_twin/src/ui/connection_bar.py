@@ -189,3 +189,4 @@ class ConnectionBar(QFrame):
                 border: 1px solid #455a64;
             }
         """)
+
