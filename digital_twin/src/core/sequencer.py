@@ -10,6 +10,10 @@ from typing import Callable, List, Optional
 import numpy as np
 
 from src.core.kinematics import RobotKinematics
+from src.core.program import (
+    Statement, MotionStatement, GripperStatement, DelayStatement,
+    TrajectoryFrame, RobotProgram
+)
 
 
 @dataclass

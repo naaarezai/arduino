@@ -45,6 +45,8 @@ class ArmVisualizer3D(QWidget):
         self.gripper_right_actor: Optional[pv.Actor] = None
         self.tcp_actor: Optional[pv.Actor] = None
         self.trajectory_actors: List[pv.Actor] = []
+        self.gizmo_widget = None
+        self._current_tcp = [0.0, 0.0, 706.0]
 
         # Add floor grid plane
         self._add_floor()
@@ -270,6 +272,7 @@ class ArmVisualizer3D(QWidget):
             self.gripper_right_actor.user_matrix = mat_r
 
         # Update TCP point
+        self._current_tcp = [pose.tcp_x, pose.tcp_y, pose.tcp_z]
         if self.tcp_actor:
             t_tcp = np.eye(4, dtype=np.float64)
             t_tcp[0, 3] = pose.tcp_x
@@ -279,11 +282,70 @@ class ArmVisualizer3D(QWidget):
 
         self.plotter.render()
 
-    def update_trajectory_path(self, keyframes, kinematics) -> None:
+    def set_gizmo_enabled(self,
+                           enabled: bool,
+                           on_jog_callback: Optional[any] = None,
+                           kinematics: Optional[any] = None,
+                           get_angles_fn: Optional[any] = None) -> None:
         """
-        Renders 3D trajectory path for Offline Programming (OLP / Visual Components style).
-        Visualizes PTP paths (cyan arcs) and LINEAR straight paths (glowing orange tubes / welding seams),
-        along with 3D waypoint marker spheres at each keyframe pose.
+        Activates or deactivates the 3D Interactive TCP Jog Gizmo.
+        When active, the user can click and drag the 3D sphere directly with the mouse
+        in the 3D viewport to manipulate the robot arm using Inverse Kinematics.
+        """
+        try:
+            self.plotter.clear_sphere_widgets()
+        except Exception:
+            pass
+        self.gizmo_widget = None
+
+        if not enabled or not on_jog_callback or not kinematics or not get_angles_fn:
+            self.plotter.render()
+            return
+
+        def _on_gizmo_drag(center):
+            x, y, z = center
+            angles = get_angles_fn()
+            roll = float(angles[4]) if len(angles) > 4 else 90.0
+            grip = float(angles[5]) if len(angles) > 5 else 40.0
+            safe_z = max(5.0, float(z))
+
+            sol = kinematics.inverse_kinematics(
+                float(x), float(y), safe_z,
+                pitch_deg=0.0, roll_deg=roll, gripper_deg=grip,
+                auto_adjust_pitch=True
+            )
+            if sol is not None:
+                on_jog_callback(sol)
+
+        try:
+            self.gizmo_widget = self.plotter.add_sphere_widget(
+                _on_gizmo_drag,
+                center=tuple(self._current_tcp),
+                radius=14.0,
+                color="#00e5ff",
+                selected_color="#ff4081",
+                interaction_event="always"
+            )
+        except Exception as e:
+            # Fallback with interaction_event='end'
+            try:
+                self.gizmo_widget = self.plotter.add_sphere_widget(
+                    _on_gizmo_drag,
+                    center=tuple(self._current_tcp),
+                    radius=14.0,
+                    color="#00e5ff"
+                )
+            except Exception:
+                pass
+        self.plotter.render()
+
+    def update_trajectory_path(self, statements_or_keyframes, kinematics) -> None:
+        """
+        Renders 3D trajectory path for Offline Programming (Visual Components style).
+        Features:
+        - Waypoint coordinate frames (tool orientation RGB axes)
+        - Collision warning detection (floor penetration Z < 0 turns red)
+        - Semi-transparent PTP cyan arcs and LINEAR orange welding seam tubes
         """
         # 1. Clear previous trajectory actors
         for act in self.trajectory_actors:
@@ -293,20 +355,37 @@ class ArmVisualizer3D(QWidget):
                 pass
         self.trajectory_actors.clear()
 
-        if not keyframes:
+        # Extract only motion items
+        motion_items = []
+        for item in (statements_or_keyframes or []):
+            if hasattr(item, "angles") and getattr(item, "statement_type", getattr(item, "motion_type", "")) in ("PTP", "LIN"):
+                motion_items.append(item)
+
+        if not motion_items:
             self.plotter.render()
             return
 
-        # 2. Extract TCP points for all keyframes
+        # 2. Extract TCP points and orientation frames for each waypoint
         tcp_points = []
-        for i, kf in enumerate(keyframes):
-            pose = kinematics.forward_kinematics([float(a) for a in kf.angles])
+        has_collision = False
+
+        for i, item in enumerate(motion_items):
+            pose = kinematics.forward_kinematics([float(a) for a in item.angles])
             pt = np.array([pose.tcp_x, pose.tcp_y, pose.tcp_z], dtype=np.float64)
             tcp_points.append(pt)
 
-            # Add waypoint marker sphere
-            color = "#ff9800" if kf.motion_type == "LIN" else "#00e5ff"
-            sphere = pv.Sphere(radius=6.0, center=pt)
+            m_type = getattr(item, "statement_type", getattr(item, "motion_type", "PTP"))
+            is_collision = (pt[2] < 2.0)  # Collision with table floor
+            if is_collision:
+                has_collision = True
+
+            # Waypoint Marker Sphere
+            if is_collision:
+                color = "#ff1744"  # Bright Red for collision
+            else:
+                color = "#ff9800" if m_type == "LIN" else "#00e5ff"
+
+            sphere = pv.Sphere(radius=5.5, center=pt)
             sphere_act = self.plotter.add_mesh(
                 sphere,
                 color=color,
@@ -316,10 +395,23 @@ class ArmVisualizer3D(QWidget):
             )
             self.trajectory_actors.append(sphere_act)
 
+            # Draw Visual Components 3-axis tool orientation frame at waypoint (RGB)
+            mat_tcp = pose.link_matrices[-1]
+            frame_len = 16.0
+            r_x = pt + mat_tcp[0:3, 0] * frame_len
+            r_y = pt + mat_tcp[0:3, 1] * frame_len
+            r_z = pt + mat_tcp[0:3, 2] * frame_len
+
+            # X = Red, Y = Green, Z = Blue
+            for end_pt, ax_color in [(r_x, "#ff5252"), (r_y, "#69f0ae"), (r_z, "#448aff")]:
+                axis_line = pv.Line(pt, end_pt).tube(radius=0.7)
+                act_ax = self.plotter.add_mesh(axis_line, color=ax_color, ambient=0.9)
+                self.trajectory_actors.append(act_ax)
+
         # 3. Draw connecting trajectory segments between consecutive waypoints
-        for i in range(1, len(keyframes)):
-            kf_prev = keyframes[i - 1]
-            kf_curr = keyframes[i]
+        for i in range(1, len(motion_items)):
+            item_prev = motion_items[i - 1]
+            item_curr = motion_items[i]
             p_start = tcp_points[i - 1]
             p_end = tcp_points[i]
 
@@ -327,40 +419,42 @@ class ArmVisualizer3D(QWidget):
             if dist < 0.5:
                 continue
 
-            if kf_curr.motion_type == "LIN":
+            m_type_curr = getattr(item_curr, "statement_type", getattr(item_curr, "motion_type", "PTP"))
+
+            if m_type_curr == "LIN":
                 # LINEAR straight line: precision Cartesian tube (orange welding seam)
                 line = pv.Line(p_start, p_end)
-                tube = line.tube(radius=2.5, n_sides=16)
+                tube = line.tube(radius=2.2, n_sides=16)
                 tube_act = self.plotter.add_mesh(
                     tube,
                     color="#ff9800",
-                    ambient=0.8,
-                    opacity=0.9,
+                    ambient=0.85,
+                    opacity=0.88,
                     smooth_shading=True
                 )
                 self.trajectory_actors.append(tube_act)
             else:
                 # PTP arc: sample intermediate robot joint angles via S-curve
-                num_substeps = max(6, int(dist / 15.0))
+                num_substeps = max(6, int(dist / 14.0))
                 sub_pts = []
                 for s in range(num_substeps + 1):
                     prog = s / float(num_substeps)
                     t_curv = (1.0 - np.cos(prog * np.pi)) / 2.0
                     sub_angles = [
                         float(a1 + (a2 - a1) * t_curv)
-                        for a1, a2 in zip(kf_prev.angles, kf_curr.angles)
+                        for a1, a2 in zip(item_prev.angles, item_curr.angles)
                     ]
                     sub_pose = kinematics.forward_kinematics(sub_angles)
                     sub_pts.append([sub_pose.tcp_x, sub_pose.tcp_y, sub_pose.tcp_z])
 
                 pts_arr = np.array(sub_pts, dtype=np.float64)
                 poly = pv.lines_from_points(pts_arr)
-                tube = poly.tube(radius=1.5, n_sides=12)
+                tube = poly.tube(radius=1.3, n_sides=12)
                 tube_act = self.plotter.add_mesh(
                     tube,
                     color="#00e5ff",
                     ambient=0.7,
-                    opacity=0.75,
+                    opacity=0.7,
                     smooth_shading=True
                 )
                 self.trajectory_actors.append(tube_act)

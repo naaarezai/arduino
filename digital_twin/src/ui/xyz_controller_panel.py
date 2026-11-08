@@ -170,3 +170,4 @@ class XyzControllerPanel(QGroupBox):
         else:
             self.lbl_ik_status.setText("⚠️ Piste työalueen ulkopuolella tai servoraja vastassa!")
             self.lbl_ik_status.setStyleSheet("color: #ff5252; font-size: 11px; font-weight: bold;")
+
