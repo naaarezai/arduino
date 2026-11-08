@@ -7,7 +7,7 @@ from typing import Callable, List, Optional
 from src.core.program import RobotProgram, TrajectoryFrame
 from src.ui.qt_compat import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QSlider, QGroupBox, QTimer, Qt
+    QProgressBar, QSlider, QGroupBox, QTimer, Qt, QCheckBox
 )
 
 
@@ -21,6 +21,8 @@ class SimulationControlPanel(QGroupBox):
                  apply_angles_fn: Callable[[List[int]], None],
                  on_frame_tick_fn: Optional[Callable[[int], None]] = None,
                  on_execute_robot_fn: Optional[Callable[[List[List[int]]], None]] = None,
+                 on_weld_tick_fn: Optional[Callable[[List[int]], None]] = None,
+                 on_clear_weld_fn: Optional[Callable[[], None]] = None,
                  parent=None):
         super().__init__("Simulation Execution & Analysis", parent)
         self.program = program
@@ -28,9 +30,12 @@ class SimulationControlPanel(QGroupBox):
         self.apply_angles = apply_angles_fn
         self.on_frame_tick = on_frame_tick_fn
         self.on_execute_robot = on_execute_robot_fn
+        self.on_weld_tick = on_weld_tick_fn
+        self.on_clear_weld = on_clear_weld_fn
 
         self.speed_multiplier: float = 1.0
         self.is_paused: bool = False
+        self.cycle_count: int = 0
         self._trajectory: List[TrajectoryFrame] = []
         self._current_frame_idx: int = 0
 
@@ -140,7 +145,32 @@ class SimulationControlPanel(QGroupBox):
         self.lbl_status.setStyleSheet("color: #858585; font-size: 11px;")
         layout.addWidget(self.lbl_status)
 
-        # 4. Big "Execute on Robot (Arduino)" Button
+        # 4. Production Loop & Weld Trace Controls
+        row_prod = QHBoxLayout()
+        row_prod.setSpacing(6)
+        self.chk_loop = QCheckBox("Loop Routine (Continuous)")
+        self.chk_loop.setStyleSheet("color: #d4d4d4; font-size: 11px; font-weight: 600;")
+        row_prod.addWidget(self.chk_loop)
+
+        self.lbl_cycles = QLabel("Cycles: 0")
+        self.lbl_cycles.setStyleSheet("color: #4fc1ff; font-family: Consolas, monospace; font-size: 11px; font-weight: bold;")
+        row_prod.addWidget(self.lbl_cycles)
+
+        row_prod.addStretch()
+
+        self.btn_clear_weld = QPushButton("Clear Weld Trace")
+        self.btn_clear_weld.setStyleSheet("""
+            QPushButton {
+                background: #252526; color: #ff9100; font-size: 11px; font-weight: 600;
+                border: 1px solid #ff9100; border-radius: 3px; padding: 3px 8px;
+            }
+            QPushButton:hover { background: #3f2a15; }
+        """)
+        self.btn_clear_weld.clicked.connect(self._clear_weld_trace)
+        row_prod.addWidget(self.btn_clear_weld)
+        layout.addLayout(row_prod)
+
+        # 5. Big "Execute on Robot (Arduino)" Button
         self.btn_execute_robot = QPushButton("Execute Routine on Arduino Hardware")
         self.btn_execute_robot.setStyleSheet("""
             QPushButton {
@@ -212,14 +242,27 @@ class SimulationControlPanel(QGroupBox):
         if self.on_frame_tick:
             self.on_frame_tick(-1)
 
+    def _clear_weld_trace(self) -> None:
+        if self.on_clear_weld:
+            self.on_clear_weld()
+
     def _on_tick(self) -> None:
         if self._current_frame_idx >= len(self._trajectory):
+            self.cycle_count += 1
+            self.lbl_cycles.setText(f"Cycles: {self.cycle_count}")
+            if self.chk_loop.isChecked():
+                self._current_frame_idx = 0
+                self.progress_bar.setValue(0)
+                return
             self.stop_simulation()
-            self.lbl_status.setText("Simulaatiosykli valmis.")
+            self.lbl_status.setText(f"Simulaatiosykli valmis. (Sykli {self.cycle_count})")
             return
 
         frame = self._trajectory[self._current_frame_idx]
         self.apply_angles(frame.angles)
+
+        if frame.is_welding and self.on_weld_tick:
+            self.on_weld_tick(frame.angles)
 
         # Update progress and statement highlight
         prog_pct = int((self._current_frame_idx + 1) * 100 / len(self._trajectory))

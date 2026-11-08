@@ -9,10 +9,12 @@ Implements Visual Components -style architecture:
 6. Live Arduino physical robot execution streaming
 """
 from typing import List, Optional
+from src.core.calibration import CalibrationManager
 from src.core.kinematics import RobotKinematics
 from src.core.program import RobotProgram, MotionStatement
 from src.communication.serial_worker import SerialWorker
 from src.simulation.arm_visualizer_3d import ArmVisualizer3D
+from src.ui.calibration_dialog import CalibrationDialog
 from src.ui.connection_bar import ConnectionBar
 from src.ui.statement_tree_panel import StatementTreePanel
 from src.ui.compact_jog_panel import CompactJogPanel
@@ -40,6 +42,7 @@ class MainWindow(QMainWindow):
         # Core engines
         self.kinematics = RobotKinematics()
         self.program = RobotProgram(kinematics=self.kinematics, name="MainRoutine")
+        self.calibration = CalibrationManager()
         self.serial_worker = SerialWorker(self)
 
         # Connection & streaming state
@@ -164,6 +167,12 @@ class MainWindow(QMainWindow):
         btn_part.clicked.connect(self._on_import_workpiece)
         view_bar.addWidget(btn_part)
 
+        self.btn_view_envelope = QPushButton("Reach Envelope")
+        self.btn_view_envelope.setCheckable(True)
+        self.btn_view_envelope.setStyleSheet(btn_style_cam)
+        self.btn_view_envelope.toggled.connect(lambda chk: self.visualizer_3d.set_reach_envelope_visible(chk))
+        view_bar.addWidget(self.btn_view_envelope)
+
         # 3D Gizmo toggle button in 3D viewport header
         self.btn_view_gizmo = QPushButton("Interactive Gizmo")
         self.btn_view_gizmo.setCheckable(True)
@@ -247,6 +256,8 @@ class MainWindow(QMainWindow):
             apply_angles_fn=self._apply_angles_to_arm,
             on_frame_tick_fn=self.statement_tree.highlight_statement,
             on_execute_robot_fn=self._on_execute_robot,
+            on_weld_tick_fn=self._on_weld_tick,
+            on_clear_weld_fn=self.visualizer_3d.clear_weld_seams,
             parent=self
         )
         s_layout.addWidget(self.sim_panel)
@@ -266,6 +277,18 @@ class MainWindow(QMainWindow):
             parent=self
         )
         h_layout.addWidget(self.conn_bar)
+
+        # Hardware Zero-Offset Calibration Button
+        btn_calib = QPushButton("Hardware Zero-Offset & Trim Calibration...")
+        btn_calib.setStyleSheet("""
+            QPushButton {
+                background: #252526; color: #4fc1ff; font-weight: 600; font-size: 11px;
+                border: 1px solid #007acc; border-radius: 3px; padding: 7px;
+            }
+            QPushButton:hover { background: #007acc; color: white; }
+        """)
+        btn_calib.clicked.connect(self._open_calibration_dialog)
+        h_layout.addWidget(btn_calib)
 
         # Full Slider Panel for fine calibration
         self.slider_panel = SliderPanel(
@@ -333,17 +356,40 @@ class MainWindow(QMainWindow):
         pose = self.kinematics.forward_kinematics([float(a) for a in sim_angles])
         self.visualizer_3d.update_pose(pose, sim_angles)
 
-        # 2. Update HUD coordinates
-        self.hud_label.setText(
-            f"TCP: X: {pose.tcp_x:6.1f} mm | Y: {pose.tcp_y:6.1f} mm | Z: {pose.tcp_z:6.1f} mm | Pitch: {pose.pitch_deg:5.1f}°"
-        )
+        # 2. Collision and Singularity checks
+        has_coll, coll_msg = self.kinematics.check_collision(pose, self.visualizer_3d.workpiece_bounds)
+        self.visualizer_3d.set_collision_highlight(has_coll)
+        sing_msg = self.kinematics.check_singularity(sim_angles)
 
-        # 3. Sync compact jog panel values
+        # 3. Update HUD coordinates and warnings
+        hud_text = f"TCP: X: {pose.tcp_x:6.1f} mm | Y: {pose.tcp_y:6.1f} mm | Z: {pose.tcp_z:6.1f} mm | Pitch: {pose.pitch_deg:5.1f}°"
+        if has_coll:
+            hud_text += f" | TÖRMÄYS: {coll_msg}"
+            self.hud_label.setStyleSheet("QLabel { background: #3b1111; color: #ff5252; font-family: Consolas, monospace; font-weight: 600; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #ff1744; }")
+        elif sing_msg:
+            hud_text += f" | VAROITUS: {sing_msg}"
+            self.hud_label.setStyleSheet("QLabel { background: #3b2d11; color: #ffd600; font-family: Consolas, monospace; font-weight: 600; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #ffab00; }")
+        else:
+            self.hud_label.setStyleSheet("QLabel { background: #1e1e1e; color: #4fc1ff; font-family: Consolas, monospace; font-weight: 600; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #333333; }")
+        self.hud_label.setText(hud_text)
+
+        # 4. Sync compact jog panel values
         self.compact_jog.sync_angles(sim_angles)
 
-        # 4. Stream to Arduino if online and not running batch sequence
+        # 5. Stream calibrated angles to Arduino if online and not running batch sequence
         if self.is_online and not self.stream_timer.isActive() and not self.sim_panel.timer.isActive():
-            self.serial_worker.send_angles(physical_angles)
+            phys_calib = self.calibration.to_physical(sim_angles)
+            self.serial_worker.send_angles(phys_calib)
+
+    def _on_weld_tick(self, angles: List[int]) -> None:
+        """Deposits weld bead segment at current TCP pose during LIN welding motion."""
+        pose = self.kinematics.forward_kinematics([float(a) for a in angles])
+        self.visualizer_3d.add_weld_point([pose.tcp_x, pose.tcp_y, pose.tcp_z])
+
+    def _open_calibration_dialog(self) -> None:
+        """Opens Hardware Zero-Offset calibration window."""
+        dlg = CalibrationDialog(self.calibration, on_test_angles_fn=self._apply_angles_to_arm, parent=self)
+        dlg.exec_()
 
     def _on_gizmo_toggled_from_view(self, checked: bool) -> None:
         self.compact_jog.btn_gizmo.setChecked(checked)
@@ -399,7 +445,7 @@ class MainWindow(QMainWindow):
             return
 
         frame = self._robot_stream_trajectory[self._robot_stream_index]
-        phys = self.compact_jog.to_physical_angles(frame)
+        phys = self.calibration.to_physical(frame)
         self.serial_worker.send_angles(phys)
 
         if self._robot_stream_index % 10 == 0 or self._robot_stream_index == len(self._robot_stream_trajectory) - 1:

@@ -20,9 +20,9 @@ PACKET_FOOTER: str = ">\n"
 
 # Kinematic Link Dimensions (in millimeters) - Calibrated to Inventor CAD models
 LINK_0_HEIGHT: float = 140.0  # Base height to Shoulder joint (J2)
-LINK_1_LENGTH: float = 213.4  # Shoulder to Elbow (J3) - arm1.stl pivot-to-pivot distance
-LINK_2_LENGTH: float = 213.4  # Elbow to Wrist Pitch (J4) - arm1.stl pivot-to-pivot distance
-LINK_3_LENGTH: float = 144.3  # Wrist Pitch to Gripper tip (J6) (45mm ranne flange + 99.3mm Tarttuja tip)
+LINK_1_LENGTH: float = 199.5  # Shoulder to Elbow (J3) - arm1.stl pivot-to-pivot distance
+LINK_2_LENGTH: float = 199.5  # Elbow to Wrist Pitch (J4) - arm1.stl pivot-to-pivot distance
+LINK_3_LENGTH: float = 149.3  # Wrist Pitch to Gripper tip (J6) (50.0mm ranne flange + 99.3mm Tarttuja tip)
 
 # Joint Names and Limits
 JOINT_NAMES = [

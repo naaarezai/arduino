@@ -15,7 +15,7 @@ class RobotPostProcessor:
     """Exports taught OLP trajectories into standard industrial robot programs."""
 
     @staticmethod
-    def to_arduino_sketch(program: RobotProgram) -> str:
+    def to_arduino_sketch(program: RobotProgram, calibration: Optional[any] = None) -> str:
         """Generates standalone Arduino C++ code to run the routine independently."""
         cpp = []
         cpp.append("// -------------------------------------------------------------")
@@ -24,13 +24,15 @@ class RobotPostProcessor:
         cpp.append("// -------------------------------------------------------------\n")
         cpp.append("#include <Servo.h>\n")
         cpp.append("Servo servos[6];")
-        cpp.append("const int servoPins[6] = {2, 3, 4, 5, 6, 7};\n")
+        cpp.append("// Arduino Uno R4 WiFi PWM servo pins")
+        cpp.append("const int servoPins[6] = {3, 5, 6, 9, 10, 11};\n")
 
         # Compile steps
         steps = []
         for stmt in program.statements:
             if isinstance(stmt, MotionStatement):
-                steps.append(f"  {{ {', '.join(str(a) for a in stmt.angles)} }}, // {stmt.statement_type} {stmt.target_id}")
+                angles = calibration.to_physical(stmt.angles) if calibration else stmt.angles
+                steps.append(f"  {{ {', '.join(str(a) for a in angles)} }}, // {stmt.statement_type} {stmt.target_id}")
             elif isinstance(stmt, GripperStatement):
                 steps.append(f"  // Gripper {stmt.action} (Jaw: {stmt.target_angle} deg)")
             elif isinstance(stmt, DelayStatement):

@@ -5,6 +5,7 @@ with animated opening/closing gripper fingers and hardware-accelerated 60 FPS po
 """
 from pathlib import Path
 from typing import Dict, List, Optional
+import math
 import numpy as np
 import pyvista as pv
 from pyvistaqt import QtInteractor
@@ -51,9 +52,13 @@ class ArmVisualizer3D(QWidget):
         self.gripper_right_actor: Optional[pv.Actor] = None
         self.tcp_actor: Optional[pv.Actor] = None
         self.workpiece_actor: Optional[pv.Actor] = None
+        self.workpiece_bounds: Optional[tuple] = None
+        self.weld_bead_actors: List[pv.Actor] = []
+        self.weld_points: List[List[float]] = []
+        self.envelope_actor: Optional[pv.Actor] = None
         self.trajectory_actors: List[pv.Actor] = []
         self.gizmo_widget = None
-        self._current_tcp = [0.0, 0.0, 706.0]
+        self._current_tcp = [0.0, 0.0, 688.3]
 
         # Add floor grid plane
         self._add_floor()
@@ -121,8 +126,8 @@ class ArmVisualizer3D(QWidget):
         l2_f = MODELS_DIR / "link2.stl"
         if l2_f.is_file():
             l2_m = pv.read(str(l2_f))
-            # Bottom pivot hole at (0, -21.03, 0) translated to origin
-            l2_m = l2_m.translate((0.0, 21.03, 0.0), inplace=False)
+            # Bottom pivot hole is at Y = -15.0; translate by +15.0 to origin
+            l2_m = l2_m.translate((0.0, 15.0, 0.0), inplace=False)
             l2_m = l2_m.transform(mat_align, inplace=False)
             l2_m = l2_m.compute_normals(auto_orient_normals=True)
         else:
@@ -135,8 +140,8 @@ class ArmVisualizer3D(QWidget):
             l3_f = l2_f
         if l3_f.is_file():
             l3_m = pv.read(str(l3_f))
-            # Bottom pivot hole at (0, -21.03, 0) translated to origin
-            l3_m = l3_m.translate((0.0, 21.03, 0.0), inplace=False)
+            # Bottom pivot hole is at Y = -15.0; translate by +15.0 to origin
+            l3_m = l3_m.translate((0.0, 15.0, 0.0), inplace=False)
             l3_m = l3_m.transform(mat_align, inplace=False)
             l3_m = l3_m.compute_normals(auto_orient_normals=True)
         else:
@@ -147,8 +152,7 @@ class ArmVisualizer3D(QWidget):
         l4_f = MODELS_DIR / "link4.stl"
         if l4_f.is_file():
             l4_m = pv.read(str(l4_f))
-            # Bottom pivot hole at (0, -6.80, 0) translated to origin
-            l4_m = l4_m.translate((0.0, 6.80, 0.0), inplace=False)
+            # Pivot hole in ranne.stl is already at (0, 0, 0)
             l4_m = l4_m.transform(mat_align, inplace=False)
             l4_m = l4_m.compute_normals(auto_orient_normals=True)
         else:
@@ -159,7 +163,8 @@ class ArmVisualizer3D(QWidget):
         grip_f = MODELS_DIR / "gripper.stl"
         if grip_f.is_file():
             grip_m = pv.read(str(grip_f))
-            grip_m = grip_m.translate((-16.5, -42.3, -39.1), inplace=False)
+            # Center X = 16.5, mount face Y = 42.3, Center Z = 39.11
+            grip_m = grip_m.translate((-16.5, -42.3, -39.11), inplace=False)
             grip_m = grip_m.rotate_x(-90, point=(0, 0, 0), inplace=False)
             grip_m = grip_m.compute_normals(auto_orient_normals=True)
 
@@ -171,9 +176,9 @@ class ArmVisualizer3D(QWidget):
             for b in bodies:
                 cx = b.center[0]
                 cz = b.center[2]
-                if cx < -15.0 and cz > 35.0:
+                if cx < -12.0 and cz > 25.0:
                     left_poly = left_poly + b
-                elif cx > 15.0 and cz > 35.0:
+                elif cx > 12.0 and cz > 25.0:
                     right_poly = right_poly + b
                 else:
                     base_poly = base_poly + b
@@ -267,12 +272,13 @@ class ArmVisualizer3D(QWidget):
             self.gripper_base_actor.user_matrix = mat_gripper
 
         # Calculate claw finger opening offset
-        open_offset = 15.0
+        open_offset = 14.0
         if joint_angles and len(joint_angles) >= 6:
             j6 = float(joint_angles[5])
-            # 40 deg = fully open (15mm offset), 128 deg = fully closed (0mm offset)
+            # 40 deg = fully open (~44mm tip gap), 128 deg = tightly closed (~0mm tip gap)
             progress = max(0.0, min(1.0, (j6 - 40.0) / (128.0 - 40.0)))
-            open_offset = (1.0 - progress) * 15.0
+            # Model default tip gap is 11.68mm. Offset -5.8mm closes it; +16.0mm opens it wide.
+            open_offset = (1.0 - progress) * 21.8 - 5.8
 
         if self.gripper_left_actor and self.gripper_right_actor:
             # Shift left and right fingers laterally along X
@@ -509,6 +515,7 @@ class ArmVisualizer3D(QWidget):
             # Position workpiece on workcell table at reachable position (X=260, Y=0, Z=0)
             mesh = mesh.translate((-mesh.center[0] + 260.0, -mesh.center[1], -mesh.bounds[4]), inplace=False)
             mesh = mesh.compute_normals(auto_orient_normals=True)
+            self.workpiece_bounds = tuple(mesh.bounds)
             self.workpiece_actor = self.plotter.add_mesh(
                 mesh,
                 color="#64748b",
@@ -531,4 +538,78 @@ class ArmVisualizer3D(QWidget):
             except Exception:
                 pass
             self.workpiece_actor = None
+            self.workpiece_bounds = None
             self.plotter.render()
+
+    def add_weld_point(self, pt: List[float]) -> None:
+        """Deposits a glowing molten weld seam bead element at the current TCP position."""
+        if not self.weld_points:
+            self.weld_points.append(list(pt))
+            return
+
+        p_prev = self.weld_points[-1]
+        dist = math.sqrt((pt[0] - p_prev[0])**2 + (pt[1] - p_prev[1])**2 + (pt[2] - p_prev[2])**2)
+        if dist < 0.8:
+            return  # Filter micro jitter
+
+        try:
+            line = pv.Line(p_prev, pt)
+            tube = line.tube(radius=2.2, n_sides=10)
+            actor = self.plotter.add_mesh(
+                tube,
+                color="#ff9100",
+                ambient=0.9,
+                specular=0.8,
+                specular_power=30,
+                smooth_shading=True
+            )
+            self.weld_bead_actors.append(actor)
+            self.weld_points.append(list(pt))
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def clear_weld_seams(self) -> None:
+        """Clears all deposited weld beads from the 3D scene."""
+        for act in self.weld_bead_actors:
+            try:
+                self.plotter.remove_actor(act)
+            except Exception:
+                pass
+        self.weld_bead_actors.clear()
+        self.weld_points.clear()
+        self.plotter.render()
+
+    def set_reach_envelope_visible(self, visible: bool) -> None:
+        """Toggles Visual Components -style semi-transparent hemispherical reach volume."""
+        if self.envelope_actor:
+            try:
+                self.plotter.remove_actor(self.envelope_actor)
+            except Exception:
+                pass
+            self.envelope_actor = None
+
+        if visible:
+            sphere = pv.Sphere(radius=570.0, center=(0, 0, self.l0), end_phi=90)
+            self.envelope_actor = self.plotter.add_mesh(
+                sphere,
+                color="#00e5ff",
+                opacity=0.12,
+                show_edges=False
+            )
+        self.plotter.render()
+
+    def set_collision_highlight(self, is_collision: bool) -> None:
+        """Highlights the robot arm links in collision warning red."""
+        orig_colors = ["#25282e", "#374151", "#0284c7", "#e2e8f0", "#ea580c"]
+        for i, act in enumerate(self.actors):
+            if hasattr(act, "prop"):
+                try:
+                    if is_collision:
+                        act.prop.color = "#ff1744"
+                    else:
+                        if i < len(orig_colors):
+                            act.prop.color = orig_colors[i]
+                except Exception:
+                    pass
+        self.plotter.render()

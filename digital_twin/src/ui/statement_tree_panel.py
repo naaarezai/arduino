@@ -11,8 +11,119 @@ from src.core.program import (
 from src.ui.qt_compat import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTreeWidget, QTreeWidgetItem, QHeaderView, QGroupBox,
-    QFileDialog, QMessageBox, Qt, QColor, QComboBox, QSpinBox
+    QFileDialog, QMessageBox, Qt, QColor, QComboBox, QSpinBox,
+    QDialog, QGridLayout
 )
+
+
+class WeldWizardDialog(QDialog):
+    """
+    Industrial Weld Seam Wizard dialog.
+    Generates a 5-step industrial welding sequence:
+    1. PTP Approach (30 mm above start)
+    2. LIN Touchdown (seam start)
+    3. LIN Weld (linear seam at controlled speed)
+    4. DELAY Crater fill dwell
+    5. LIN Retract (30 mm above seam end)
+    """
+    def __init__(self, kinematics: RobotKinematics, current_angles: List[int], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Industrial Weld Seam Wizard")
+        self.resize(380, 280)
+        self.setStyleSheet("""
+            QDialog { background: #1e1e1e; color: #d4d4d4; }
+            QLabel { color: #cccccc; font-size: 11px; font-weight: 600; }
+            QSpinBox, QComboBox {
+                background: #252526; color: #ffffff; border: 1px solid #3f3f46;
+                border-radius: 3px; padding: 4px; font-size: 11px;
+            }
+        """)
+        self.kinematics = kinematics
+        self.current_angles = current_angles
+        self.result_statements = []
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        title = QLabel("Automatic Weld & Contour Path Generator")
+        title.setStyleSheet("font-weight: bold; font-size: 12px; color: #a855f7;")
+        layout.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setSpacing(8)
+
+        grid.addWidget(QLabel("Seam Length (mm):"), 0, 0)
+        self.spin_len = QSpinBox()
+        self.spin_len.setRange(10, 250)
+        self.spin_len.setValue(60)
+        grid.addWidget(self.spin_len, 0, 1)
+
+        grid.addWidget(QLabel("Direction:"), 1, 0)
+        self.combo_dir = QComboBox()
+        self.combo_dir.addItems(["+X (Forward)", "-X (Backward)", "+Y (Left)", "-Y (Right)"])
+        grid.addWidget(self.combo_dir, 1, 1)
+
+        grid.addWidget(QLabel("Approach Height (mm):"), 2, 0)
+        self.spin_approach = QSpinBox()
+        self.spin_approach.setRange(10, 100)
+        self.spin_approach.setValue(30)
+        grid.addWidget(self.spin_approach, 2, 1)
+
+        grid.addWidget(QLabel("Weld Speed (%):"), 3, 0)
+        self.spin_speed = QSpinBox()
+        self.spin_speed.setRange(10, 100)
+        self.spin_speed.setValue(40)
+        grid.addWidget(self.spin_speed, 3, 1)
+
+        layout.addLayout(grid)
+
+        # Action Buttons
+        btn_box = QHBoxLayout()
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setStyleSheet("background: #2d2d30; color: #cccccc; padding: 6px 12px; border-radius: 3px;")
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+
+        btn_gen = QPushButton("Generate 5-Step Routine")
+        btn_gen.setStyleSheet("background: #7c3aed; color: white; font-weight: bold; padding: 6px 14px; border-radius: 3px;")
+        btn_gen.clicked.connect(self._generate)
+        btn_box.addWidget(btn_gen)
+        layout.addLayout(btn_box)
+
+    def _generate(self):
+        p_start = self.kinematics.forward_kinematics([float(a) for a in self.current_angles])
+        length = float(self.spin_len.value())
+        app_h = float(self.spin_approach.value())
+        speed = self.spin_speed.value()
+        direction = self.combo_dir.currentIndex()
+
+        dx, dy = 0.0, 0.0
+        if direction == 0:   dx = length
+        elif direction == 1: dx = -length
+        elif direction == 2: dy = length
+        elif direction == 3: dy = -length
+
+        # 1. Approach: p_start + (0, 0, app_h)
+        sol_app = self.kinematics.inverse_kinematics(p_start.tcp_x, p_start.tcp_y, p_start.tcp_z + app_h, p_start.pitch_deg, auto_adjust_pitch=True)
+        # 2. Touchdown: p_start
+        sol_start = self.kinematics.inverse_kinematics(p_start.tcp_x, p_start.tcp_y, p_start.tcp_z, p_start.pitch_deg, auto_adjust_pitch=True)
+        # 3. End of seam: p_start + (dx, dy, 0)
+        sol_end = self.kinematics.inverse_kinematics(p_start.tcp_x + dx, p_start.tcp_y + dy, p_start.tcp_z, p_start.pitch_deg, auto_adjust_pitch=True)
+        # 4. Retract: p_start + (dx, dy, app_h)
+        sol_retract = self.kinematics.inverse_kinematics(p_start.tcp_x + dx, p_start.tcp_y + dy, p_start.tcp_z + app_h, p_start.pitch_deg, auto_adjust_pitch=True)
+
+        if not all([sol_app, sol_start, sol_end, sol_retract]):
+            QMessageBox.warning(self, "Ulottuvuusraja", "Osa lasketusta hitsausradasta on robotin työalueen ulkopuolella!\nKokeile pienempää saumapituutta tai eri suuntaa.")
+            return
+
+        self.result_statements = [
+            ("PTP", sol_app, 100, "Approach to seam start"),
+            ("LIN", sol_start, 60, "Touchdown at seam start"),
+            ("LIN", sol_end, speed, "Weld linear seam"),
+            ("DELAY", 500, 0, "Crater fill dwell"),
+            ("LIN", sol_retract, 80, "Retract above seam end"),
+        ]
+        self.accept()
 
 
 class StatementTreePanel(QGroupBox):
@@ -91,6 +202,18 @@ class StatementTreePanel(QGroupBox):
         self.btn_add_delay.setToolTip("Lisää pito/viive hitsauspisteeseen")
         self.btn_add_delay.clicked.connect(self._add_delay)
         tb_layout.addWidget(self.btn_add_delay)
+
+        self.btn_weld_wiz = QPushButton("+ Weld Wizard")
+        self.btn_weld_wiz.setStyleSheet("""
+            QPushButton {
+                background: #5b21b6; color: white; font-weight: 600; font-size: 11px;
+                border: 1px solid #7c3aed; border-radius: 3px; padding: 5px 9px;
+            }
+            QPushButton:hover { background: #7c3aed; }
+        """)
+        self.btn_weld_wiz.setToolTip("Generoi automaattinen 5-vaiheinen teollisuushitsausliike")
+        self.btn_weld_wiz.clicked.connect(self._open_weld_wizard)
+        tb_layout.addWidget(self.btn_weld_wiz)
 
         tb_layout.addStretch()
         layout.addLayout(tb_layout)
@@ -325,6 +448,18 @@ class StatementTreePanel(QGroupBox):
                 angles = self.get_current_angles()
                 angles[5] = stmt.target_angle
                 self.apply_angles(angles)
+
+    def _open_weld_wizard(self) -> None:
+        """Opens interactive wizard to create Approach -> Touchdown -> Weld -> Retract sequence."""
+        angles = self.get_current_angles()
+        dlg = WeldWizardDialog(self.program.kinematics, angles, self)
+        if dlg.exec_():
+            for st_type, data, speed, comment in dlg.result_statements:
+                if st_type == "DELAY":
+                    self.program.add_delay(duration_ms=data, comment=comment)
+                else:
+                    self.program.add_motion(data, motion_type=st_type, speed_percent=speed, comment=comment)
+            self.refresh_tree()
 
     def _save_program(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Tallenna OLP-ohjelma", "", "JSON-ohjelmat (*.json)")

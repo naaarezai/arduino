@@ -116,8 +116,8 @@ class RobotKinematics:
         r4 = rot_y_matrix(j4 - math.pi / 2.0)
         t_link4 = t_wrist_joint @ r4
 
-        # Link 5 (Tarttujan runko / roll): Mounted at end of Link 4 (+45mm)
-        t_wrist_flange = t_link4 @ translation_matrix(0, 0, 45.0)
+        # Link 5 (Tarttujan runko / roll): Mounted at end of Link 4 (+50.0mm ranne flange)
+        t_wrist_flange = t_link4 @ translation_matrix(0, 0, 50.0)
         r5 = rot_z_matrix(j5 - math.pi / 2.0)
         t_link5 = t_wrist_flange @ r5
 
@@ -125,7 +125,7 @@ class RobotKinematics:
         t_gripper = t_link5
 
         # Gripper Tool Center Point (TCP): fingertip contact point
-        tool_reach = max(10.0, self.l3 - 45.0)
+        tool_reach = max(10.0, self.l3 - 50.0)
         t_tcp = t_gripper @ translation_matrix(0, 0, tool_reach)
 
         # Extract TCP Cartesian coordinates
@@ -310,3 +310,62 @@ class RobotKinematics:
                 path.append(ptp_step)
 
         return path
+
+    def check_collision(self, pose: PoseData, workpiece_bounds: Optional[Tuple[float, float, float, float, float, float]] = None) -> Tuple[bool, str]:
+        """
+        Evaluates potential collisions for the given pose:
+        1. Floor/Table penetration (Z < 1 mm).
+        2. Self-collision (Elbow / Wrist / Gripper folding into base).
+        3. Workpiece collision (Body links penetrating workpiece bounding box).
+        Returns (has_collision, description).
+        """
+        # 1. Floor collision check
+        # Check TCP and all joint origins
+        for i, m in enumerate(pose.link_matrices):
+            pos_z = float(m[2, 3])
+            # Links 2..7 must remain above table floor Z=0
+            if i >= 2 and pos_z < 0.0:
+                link_name = f"Link {i}" if i < 4 else ("Ranne" if i == 4 else "Gripper")
+                return True, f"Törmäys työpöytään ({link_name} Z={pos_z:.1f} mm < 0 mm)"
+
+        if pose.tcp_z < 0.0:
+            return True, f"TCP törmää työpöytään (Z={pose.tcp_z:.1f} mm < 0 mm)"
+
+        # 2. Self-collision check (folded configurations)
+        # Distance from Wrist joint (matrix 4) to Base origin (0, 0, L0)
+        p_wrist = pose.link_matrices[4][:3, 3]
+        dist_wrist_base = math.sqrt(p_wrist[0]**2 + p_wrist[1]**2 + (p_wrist[2] - self.l0)**2)
+        if dist_wrist_base < 65.0:
+            return True, f"Itsetörmäys: Ranne osuu jalustaan (etäisyys {dist_wrist_base:.1f} mm < 65 mm)"
+
+        # 3. Workpiece collision check
+        if workpiece_bounds:
+            xmin, xmax, ymin, ymax, zmin, zmax = workpiece_bounds
+            # Check if Link 2 or Link 3 origin falls inside workpiece
+            for i in (2, 3, 4):
+                lp = pose.link_matrices[i][:3, 3]
+                if (xmin <= lp[0] <= xmax) and (ymin <= lp[1] <= ymax) and (zmin <= lp[2] <= zmax):
+                    return True, f"Törmäys työkappaleeseen (Link {i} sisällä)"
+
+        return False, "Ei törmäystä (Clear)"
+
+    def check_singularity(self, joint_angles: List[int]) -> Optional[str]:
+        """
+        Monitors proximity to kinematic singularities:
+        - Boundary / Reach Singularity (arm stretched to absolute maximum reach).
+        - Wrist Alignment Singularity (wrist pitch/roll collinearity).
+        """
+        pose = self.forward_kinematics([float(a) for a in joint_angles])
+        # Horizontal reach from shoulder
+        r_reach = math.sqrt(pose.tcp_x**2 + pose.tcp_y**2 + (pose.tcp_z - self.l0)**2)
+        max_possible = self.l1 + self.l2 + self.l3
+
+        if r_reach > 0.96 * max_possible:
+            return f"Äärirajas singulariteetti: Käsivarsi lähes suorana ({r_reach:.1f} mm / {max_possible:.1f} mm)"
+
+        j3 = joint_angles[2]
+        if abs(j3 - 90) > 85:
+            return f"Kyynärnivelen ääriasento: J3={j3}° lähellä mekaanista rajaa"
+
+        return None
+

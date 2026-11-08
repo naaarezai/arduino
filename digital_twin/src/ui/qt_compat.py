@@ -18,7 +18,7 @@ try:
         QLabel, QSlider, QSpinBox, QPushButton, QComboBox, QGroupBox, 
         QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QStatusBar,
         QMessageBox, QFileDialog, QFrame, QCheckBox, QTabWidget,
-        QRadioButton, QButtonGroup, QDoubleSpinBox,
+        QRadioButton, QButtonGroup, QDoubleSpinBox, QDialog,
         QTreeWidget, QTreeWidgetItem, QProgressBar, QToolBar, QAction,
         QShortcut
     )
@@ -33,7 +33,7 @@ except Exception as e:
         QLabel, QSlider, QSpinBox, QPushButton, QComboBox, QGroupBox, 
         QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QStatusBar,
         QMessageBox, QFileDialog, QFrame, QCheckBox, QTabWidget,
-        QRadioButton, QButtonGroup, QDoubleSpinBox,
+        QRadioButton, QButtonGroup, QDoubleSpinBox, QDialog,
         QTreeWidget, QTreeWidgetItem, QProgressBar, QToolBar,
         QShortcut
     )

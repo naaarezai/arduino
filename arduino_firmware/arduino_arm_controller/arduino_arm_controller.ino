@@ -20,50 +20,47 @@
   ========================================================================
 */
 
+#include "Arduino_LED_Matrix.h"
 #include <ArduinoBLE.h>
 #include <Servo.h>
-#include "Arduino_LED_Matrix.h"
 
 ArduinoLEDMatrix matrix;
 
 // Määritellään servojen pinnit (Uno R4 WiFi PWM-pinnit)
-const int PIN_SERVO_1 = 3;   // Jalusta
-const int PIN_SERVO_2 = 5;   // Olkavarsi
-const int PIN_SERVO_3 = 6;   // Kyynärvarsi
-const int PIN_SERVO_4 = 9;   // Ranne pysty
-const int PIN_SERVO_5 = 10;  // Ranne kierto
-const int PIN_SERVO_6 = 11;  // Koura
+const int PIN_SERVO_1 = 3;  // Jalusta
+const int PIN_SERVO_2 = 5;  // Olkavarsi
+const int PIN_SERVO_3 = 6;  // Kyynärvarsi
+const int PIN_SERVO_4 = 9;  // Ranne pysty
+const int PIN_SERVO_5 = 10; // Ranne kierto
+const int PIN_SERVO_6 = 11; // Koura
 
 const int NUM_SERVOS = 6;
 Servo servos[NUM_SERVOS];
-const int servoPins[NUM_SERVOS] = {
-  PIN_SERVO_1, PIN_SERVO_2, PIN_SERVO_3,
-  PIN_SERVO_4, PIN_SERVO_5, PIN_SERVO_6
-};
+const int servoPins[NUM_SERVOS] = {PIN_SERVO_1, PIN_SERVO_2, PIN_SERVO_3,
+                                   PIN_SERVO_4, PIN_SERVO_5, PIN_SERVO_6};
 
 // Nykyiset ja tavoitekulmat (0 - 180 astetta, Servo 6 rajattu 40 - 128 astetta)
 float currentAngles[NUM_SERVOS] = {90.0, 90.0, 90.0, 90.0, 90.0, 40.0};
-float targetAngles[NUM_SERVOS]  = {90.0, 90.0, 90.0, 90.0, 90.0, 40.0};
+float targetAngles[NUM_SERVOS] = {90.0, 90.0, 90.0, 90.0, 90.0, 40.0};
 
 // Mekaaniset kulmarajat (Servo 6 koura rajattu välille 40 - 128 astetta)
 const int minAngles[NUM_SERVOS] = {0, 0, 0, 0, 0, 40};
 const int maxAngles[NUM_SERVOS] = {180, 180, 180, 180, 180, 128};
 
 // Liikkeen pehmennysnopeus (asteina per askel)
-const float SPEED_STEP = 1.0; 
+const float SPEED_STEP = 1.0;
 const unsigned long STEP_INTERVAL_MS = 15; // Päivitysväli millisekunteina
 unsigned long lastStepTime = 0;
 
 // BLE Palvelu ja Karakteristiikka
-const char* SERVICE_UUID        = "19B10000-E8F2-537E-4F6C-D104768A1214";
-const char* CHARACTERISTIC_UUID = "19B10001-E8F2-537E-4F6C-D104768A1214";
+const char *SERVICE_UUID = "19B10000-E8F2-537E-4F6C-D104768A1214";
+const char *CHARACTERISTIC_UUID = "19B10001-E8F2-537E-4F6C-D104768A1214";
 
 BLEService armService(SERVICE_UUID);
-BLECharacteristic armCharacteristic(
-  CHARACTERISTIC_UUID, 
-  BLERead | BLEWrite | BLEWriteWithoutResponse | BLENotify, 
-  20
-);
+BLECharacteristic armCharacteristic(CHARACTERISTIC_UUID,
+                                    BLERead | BLEWrite |
+                                        BLEWriteWithoutResponse | BLENotify,
+                                    20);
 
 // Sisäänrakennettu LED (Pin 13)
 const int LED_PIN = LED_BUILTIN;
@@ -74,25 +71,13 @@ unsigned long lastCmdTime = 0;
 
 // LED Matrix kuvakkeet (12x8)
 // Bluetooth-ikoni odotustilassa
-const uint32_t iconBluetooth[] = {
-  0x0400c014,
-  0x24424014,
-  0x0c004000
-};
+const uint32_t iconBluetooth[] = {0x0400c014, 0x24424014, 0x0c004000};
 
 // Robottikäsi / Nuoli liikkeen aikana
-const uint32_t iconMoving[] = {
-  0x1fc02004,
-  0x08010020,
-  0x0401fc00
-};
+const uint32_t iconMoving[] = {0x1fc02004, 0x08010020, 0x0401fc00};
 
 // OK / Valmis -ruutu kun asento saavutettu
-const uint32_t iconReady[] = {
-  0x00000200,
-  0x40081040,
-  0x20000000
-};
+const uint32_t iconReady[] = {0x00000200, 0x40081040, 0x20000000};
 
 void setup() {
   Serial.begin(115200);
@@ -152,9 +137,10 @@ void checkSerialInput() {
       if (receiving) {
         serialBuf[bufIndex] = '\0';
         receiving = false;
-        
+
         int a0, a1, a2, a3, a4, a5;
-        if (sscanf(serialBuf, "%d,%d,%d,%d,%d,%d", &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
+        if (sscanf(serialBuf, "%d,%d,%d,%d,%d,%d", &a0, &a1, &a2, &a3, &a4,
+                   &a5) == 6) {
           targetAngles[0] = constrain(a0, minAngles[0], maxAngles[0]);
           targetAngles[1] = constrain(a1, minAngles[1], maxAngles[1]);
           targetAngles[2] = constrain(a2, minAngles[2], maxAngles[2]);
@@ -186,11 +172,12 @@ void loop() {
     matrix.loadFrame(iconReady);
 
     while (central.connected()) {
-      checkSerialInput(); // Kuunnellaan USB-sarjaliikennettä myös BLE-yhteyden aikana
+      checkSerialInput(); // Kuunnellaan USB-sarjaliikennettä myös BLE-yhteyden
+                          // aikana
 
       if (armCharacteristic.written()) {
         int len = armCharacteristic.valueLength();
-        const uint8_t* val = armCharacteristic.value();
+        const uint8_t *val = armCharacteristic.value();
 
         if (len == 6) {
           for (int i = 0; i < NUM_SERVOS; i++) {
@@ -239,10 +226,12 @@ void updateServoPositions() {
       movingNow = true;
       if (currentAngles[i] < targetAngles[i]) {
         currentAngles[i] += SPEED_STEP;
-        if (currentAngles[i] > targetAngles[i]) currentAngles[i] = targetAngles[i];
+        if (currentAngles[i] > targetAngles[i])
+          currentAngles[i] = targetAngles[i];
       } else {
         currentAngles[i] -= SPEED_STEP;
-        if (currentAngles[i] < targetAngles[i]) currentAngles[i] = targetAngles[i];
+        if (currentAngles[i] < targetAngles[i])
+          currentAngles[i] = targetAngles[i];
       }
       servos[i].write((int)round(currentAngles[i]));
     }
@@ -250,7 +239,8 @@ void updateServoPositions() {
 
   // Valojen ohjaus liikkeen mukaan
   if (movingNow) {
-    // Kun servot liikkuvat: sytytetään LED_BUILTIN ja näytetään liikesymboli matriisissa
+    // Kun servot liikkuvat: sytytetään LED_BUILTIN ja näytetään liikesymboli
+    // matriisissa
     digitalWrite(LED_PIN, HIGH);
     if (!isMoving) {
       matrix.loadFrame(iconMoving);
@@ -264,13 +254,14 @@ void updateServoPositions() {
       isMoving = false;
       // Lähetetään kuittaus BLE:n kautta takaisin puhelimeen
       uint8_t reportData[NUM_SERVOS];
-      for (int i = 0; i < NUM_SERVOS; i++) reportData[i] = (uint8_t)currentAngles[i];
+      for (int i = 0; i < NUM_SERVOS; i++)
+        reportData[i] = (uint8_t)currentAngles[i];
       armCharacteristic.writeValue(reportData, NUM_SERVOS);
     }
   }
 }
 
-void parseTextCommand(const char* str) {
+void parseTextCommand(const char *str) {
   int a0, a1, a2, a3, a4, a5;
   if (sscanf(str, "%d,%d,%d,%d,%d,%d", &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
     targetAngles[0] = constrain(a0, minAngles[0], maxAngles[0]);
