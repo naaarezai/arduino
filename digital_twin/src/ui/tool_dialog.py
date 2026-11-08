@@ -313,3 +313,4 @@ class ToolManagerDialog(QDialog):
         if self.on_apply_callback:
             self.on_apply_callback(self.current_tool)
         self.accept()
+

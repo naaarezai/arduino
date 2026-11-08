@@ -51,6 +51,10 @@ class ArmVisualizer3D(QWidget):
         self.gripper_base_actor: Optional[pv.Actor] = None
         self.gripper_left_actor: Optional[pv.Actor] = None
         self.gripper_right_actor: Optional[pv.Actor] = None
+        self.welding_torch_actor: Optional[pv.Actor] = None
+        self.dispenser_actor: Optional[pv.Actor] = None
+        self.vacuum_actor: Optional[pv.Actor] = None
+        self.custom_tool_actor: Optional[pv.Actor] = None
         self.active_tool_actor: Optional[pv.Actor] = None
         self.tool_manager = ToolManager()
         self.active_tool: ToolProfile = self.tool_manager.active_tool
@@ -282,40 +286,62 @@ class ArmVisualizer3D(QWidget):
         updating the 3D viewport representation and TCP marker.
         """
         self.active_tool = tool
+        ttype = tool.tool_type
 
-        if self.active_tool_actor:
-            try:
-                self.plotter.remove_actor(self.active_tool_actor)
-            except Exception:
-                pass
-            self.active_tool_actor = None
+        # Hide all tool actors first
+        if self.gripper_base_actor: self.gripper_base_actor.SetVisibility(False)
+        if self.gripper_left_actor: self.gripper_left_actor.SetVisibility(False)
+        if self.gripper_right_actor: self.gripper_right_actor.SetVisibility(False)
+        if self.welding_torch_actor: self.welding_torch_actor.SetVisibility(False)
+        if self.dispenser_actor: self.dispenser_actor.SetVisibility(False)
+        if self.vacuum_actor: self.vacuum_actor.SetVisibility(False)
+        if self.custom_tool_actor: self.custom_tool_actor.SetVisibility(False)
 
-        is_gripper = (tool.tool_type == "GRIPPER")
-
-        if self.gripper_base_actor:
-            self.gripper_base_actor.SetVisibility(is_gripper)
-        if self.gripper_left_actor:
-            self.gripper_left_actor.SetVisibility(is_gripper)
-        if self.gripper_right_actor:
-            self.gripper_right_actor.SetVisibility(is_gripper)
-
-        if not is_gripper:
-            if tool.tool_type == "WELDING_TORCH":
+        if ttype == "GRIPPER":
+            if self.gripper_base_actor: self.gripper_base_actor.SetVisibility(True)
+            if self.gripper_left_actor: self.gripper_left_actor.SetVisibility(True)
+            if self.gripper_right_actor: self.gripper_right_actor.SetVisibility(True)
+            self.active_tool_actor = self.gripper_base_actor
+        elif ttype == "WELDING_TORCH":
+            if not self.welding_torch_actor:
                 mesh = self._make_welding_torch()
-            elif tool.tool_type == "DISPENSER":
+                self.welding_torch_actor = self.plotter.add_mesh(
+                    mesh, color="#ff9100", specular=0.45, specular_power=25, smooth_shading=True
+                )
+            self.welding_torch_actor.SetVisibility(True)
+            self.active_tool_actor = self.welding_torch_actor
+        elif ttype == "DISPENSER":
+            if not self.dispenser_actor:
                 mesh = self._make_dispenser()
-            elif tool.tool_type == "VACUUM":
+                self.dispenser_actor = self.plotter.add_mesh(
+                    mesh, color="#00e676", specular=0.45, specular_power=25, smooth_shading=True
+                )
+            self.dispenser_actor.SetVisibility(True)
+            self.active_tool_actor = self.dispenser_actor
+        elif ttype == "VACUUM":
+            if not self.vacuum_actor:
                 mesh = self._make_vacuum()
-            elif tool.tool_type == "CUSTOM_STL" and tool.mesh_path and Path(tool.mesh_path).is_file():
+                self.vacuum_actor = self.plotter.add_mesh(
+                    mesh, color="#e040fb", specular=0.45, specular_power=25, smooth_shading=True
+                )
+            self.vacuum_actor.SetVisibility(True)
+            self.active_tool_actor = self.vacuum_actor
+        elif ttype == "CUSTOM_STL":
+            if self.custom_tool_actor:
+                try:
+                    self.plotter.remove_actor(self.custom_tool_actor)
+                except Exception:
+                    pass
+                self.custom_tool_actor = None
+            if tool.mesh_path and Path(tool.mesh_path).is_file():
                 mesh = pv.read(tool.mesh_path)
                 mesh = mesh.translate((-mesh.center[0], -mesh.center[1], -mesh.bounds[4]), inplace=False)
-            else:
-                mesh = self._make_procedural_gripper()
-
-            mesh = mesh.compute_normals(auto_orient_normals=True)
-            self.active_tool_actor = self.plotter.add_mesh(
-                mesh, color=tool.color, specular=0.45, specular_power=25, smooth_shading=True
-            )
+                mesh = mesh.compute_normals(auto_orient_normals=True)
+                self.custom_tool_actor = self.plotter.add_mesh(
+                    mesh, color=tool.color, specular=0.45, specular_power=25, smooth_shading=True
+                )
+                self.custom_tool_actor.SetVisibility(True)
+                self.active_tool_actor = self.custom_tool_actor
 
         if self.tcp_actor:
             try:

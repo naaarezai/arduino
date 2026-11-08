@@ -431,13 +431,16 @@ class MainWindow(QMainWindow):
 
     def _open_tool_dialog(self) -> None:
         """Opens Tool & TCP setup dialog for mounting tools and configuring TCP offsets."""
-        from src.ui.tool_dialog import ToolManagerDialog
-        dlg = ToolManagerDialog(
-            tool_manager=self.visualizer_3d.tool_manager,
-            on_apply_callback=self._on_tool_applied,
-            parent=self
-        )
-        dlg.exec_()
+        try:
+            from src.ui.tool_dialog import ToolManagerDialog
+            dlg = ToolManagerDialog(
+                tool_manager=self.visualizer_3d.tool_manager,
+                on_apply_callback=self._on_tool_applied,
+                parent=self
+            )
+            dlg.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Virhe työkalun avauksessa", f"Työkaludialogin avaus epäonnistui:\n{e}")
 
     def _on_tool_applied(self, tool) -> None:
         """Applies new tool profile to kinematics engine, 3D visualizer, and HUD."""

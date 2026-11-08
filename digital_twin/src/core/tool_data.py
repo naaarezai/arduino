@@ -122,3 +122,4 @@ class ToolManager:
             self.save_tool(tool)
             return tool
         return self.active_tool
+
