@@ -1,3 +1,8 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+
 # Flutter & Dart build artifacts
 robot_arm_app/build/
 robot_arm_app/.dart_tool/
