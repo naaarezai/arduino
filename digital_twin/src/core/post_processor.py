@@ -7,7 +7,7 @@ Translates the taught RobotProgram routine into standard industrial robot langua
 4. KUKA KRL (PTP / LIN industrial automation)
 """
 from typing import List, Optional
-from src.core.program import RobotProgram, MotionStatement, GripperStatement, DelayStatement
+from src.core.program import RobotProgram, MotionStatement, GripperStatement, DelayStatement, ToolActionStatement
 from src.core.kinematics import RobotKinematics
 
 
@@ -35,6 +35,8 @@ class RobotPostProcessor:
                 steps.append(f"  {{ {', '.join(str(a) for a in angles)} }}, // {stmt.statement_type} {stmt.target_id}")
             elif isinstance(stmt, GripperStatement):
                 steps.append(f"  // Gripper {stmt.action} (Jaw: {stmt.target_angle} deg)")
+            elif isinstance(stmt, ToolActionStatement):
+                steps.append(f"  // Tool {stmt.tool_type} {stmt.action}")
             elif isinstance(stmt, DelayStatement):
                 steps.append(f"  // Delay {stmt.duration_ms} ms")
 
@@ -84,6 +86,9 @@ class RobotPostProcessor:
             elif isinstance(stmt, GripperStatement):
                 m_cmd = "M3 ; Tool On / Close Gripper" if stmt.action == "CLOSE" else "M5 ; Tool Off / Open Gripper"
                 gcode.append(m_cmd)
+            elif isinstance(stmt, ToolActionStatement):
+                m_cmd = f"M8 ; {stmt.tool_type} ON" if stmt.action == "ON" else f"M9 ; {stmt.tool_type} OFF"
+                gcode.append(m_cmd)
             elif isinstance(stmt, DelayStatement):
                 gcode.append(f"G4 P{stmt.duration_ms} ; Dwell {stmt.duration_ms} ms")
 
@@ -108,6 +113,9 @@ class RobotPostProcessor:
             elif isinstance(stmt, GripperStatement):
                 sig = "1" if stmt.action == "CLOSE" else "0"
                 rapid.append(f"    SetDO do_gripper, {sig}; ! {stmt.action}")
+            elif isinstance(stmt, ToolActionStatement):
+                sig = "1" if stmt.action == "ON" else "0"
+                rapid.append(f"    SetDO do_{stmt.tool_type.lower()}, {sig}; ! {stmt.action}")
             elif isinstance(stmt, DelayStatement):
                 rapid.append(f"    WaitTime {stmt.duration_ms / 1000.0:.2f};")
 

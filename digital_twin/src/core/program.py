@@ -41,6 +41,13 @@ class Statement:
                 duration_ms=data.get("duration_ms", 500),
                 comment=data.get("comment", "")
             )
+        elif st_type == "TOOL_ACTION":
+            return ToolActionStatement(
+                tool_type=data.get("tool_type", "VACUUM"),
+                action=data.get("action", "ON"),
+                duration_ms=data.get("duration_ms", 300),
+                comment=data.get("comment", "")
+            )
         elif st_type == "DELAY":
             return DelayStatement(
                 duration_ms=data.get("duration_ms", 500),
@@ -58,11 +65,14 @@ class MotionStatement(Statement):
     speed_percent: int = 100
     duration_ms: int = 1500
     comment: str = ""
+    is_welding: bool = False
 
     def __post_init__(self):
         if not self.comment:
-            if self.statement_type == "LIN":
-                self.comment = f"Hitsaussauma / Suora ({self.target_id})"
+            if self.is_welding:
+                self.comment = f"Hitsaussauma LIN ({self.target_id})"
+            elif self.statement_type == "LIN":
+                self.comment = f"Suoraviivainen siirto ({self.target_id})"
             else:
                 self.comment = f"Siirto pisteeseen {self.target_id}"
 
@@ -79,6 +89,20 @@ class GripperStatement(Statement):
     def __post_init__(self):
         if not self.comment:
             self.comment = "Koura kiinni (Ote)" if self.action == "CLOSE" else "Koura auki (Päästä)"
+
+
+@dataclass
+class ToolActionStatement(Statement):
+    """Action statement for non-servo tools (Vacuum Cup, Dispenser, Digital I/O)."""
+    statement_type: str = "TOOL_ACTION"
+    tool_type: str = "VACUUM"     # "VACUUM", "DISPENSER", "IO"
+    action: str = "ON"            # "ON" or "OFF"
+    duration_ms: int = 300
+    comment: str = ""
+
+    def __post_init__(self):
+        if not self.comment:
+            self.comment = f"{self.tool_type} {self.action}"
 
 
 @dataclass
@@ -116,7 +140,8 @@ class RobotProgram:
                    target_id: Optional[str] = None,
                    speed_percent: int = 100,
                    duration_ms: int = 1500,
-                   comment: str = "") -> MotionStatement:
+                   comment: str = "",
+                   is_welding: bool = False) -> MotionStatement:
         if not target_id:
             target_id = f"P{self._target_counter}"
             self._target_counter += 1
@@ -127,7 +152,8 @@ class RobotProgram:
             angles=list(angles),
             speed_percent=speed_percent,
             duration_ms=duration_ms,
-            comment=comment
+            comment=comment,
+            is_welding=is_welding
         )
         self.statements.append(stmt)
         return stmt
@@ -140,6 +166,16 @@ class RobotProgram:
             target_angle=target_angle,
             duration_ms=500,
             comment=comment
+        )
+        self.statements.append(stmt)
+        return stmt
+
+    def add_tool_action(self, tool_type: str = "VACUUM", action: str = "ON", duration_ms: int = 300, comment: str = "") -> ToolActionStatement:
+        stmt = ToolActionStatement(
+            tool_type=tool_type,
+            action=action,
+            duration_ms=duration_ms,
+            comment=comment or f"{tool_type} {action}"
         )
         self.statements.append(stmt)
         return stmt
@@ -193,11 +229,23 @@ class RobotProgram:
         curr = list(current_angles)
         step_dt_ms = 35.0 / max(0.2, min(5.0, speed_multiplier))
 
+        # Check if active tool is specifically a WELDING_TORCH
+        active_tool = getattr(self.kinematics, "active_tool", None)
+        is_torch = bool(active_tool and getattr(active_tool, "tool_type", "") == "WELDING_TORCH")
+
         for idx, stmt in enumerate(self.statements):
             if isinstance(stmt, MotionStatement):
                 target = list(stmt.angles)
                 is_lin = (stmt.statement_type == "LIN")
                 label = f"{stmt.statement_type} {stmt.target_id}"
+
+                # Motion is ONLY welding if active tool is WELDING_TORCH AND statement is marked or named as welding!
+                frame_is_welding = bool(
+                    is_torch and (
+                        getattr(stmt, "is_welding", False) or
+                        any(w in stmt.comment.lower() for w in ["weld", "hitsaus", "sauma", "arc on", "pendlaus"])
+                    )
+                )
 
                 if is_lin:
                     # Cartesian straight line
@@ -207,7 +255,7 @@ class RobotProgram:
                             angles=frame_angles,
                             statement_idx=idx,
                             statement_label=label,
-                            is_welding=True
+                            is_welding=frame_is_welding
                         ))
                 else:
                     # Joint S-curve interpolation
@@ -247,6 +295,18 @@ class RobotProgram:
                         is_welding=False
                     ))
                 curr[5] = end_j6
+
+            elif isinstance(stmt, ToolActionStatement):
+                label = f"{stmt.tool_type}: {stmt.action}"
+                eff_duration = max(100, int(stmt.duration_ms / speed_multiplier))
+                pause_steps = max(2, int(eff_duration / step_dt_ms))
+                for _ in range(pause_steps):
+                    frames.append(TrajectoryFrame(
+                        angles=list(curr),
+                        statement_idx=idx,
+                        statement_label=label,
+                        is_welding=False
+                    ))
 
             elif isinstance(stmt, DelayStatement):
                 label = f"Odotus {stmt.duration_ms} ms"

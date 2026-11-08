@@ -207,11 +207,12 @@ class TestWorkpieceAndWelding(unittest.TestCase):
             self.assertTrue(all(0 <= sol[i] <= 180 for i in range(5)))
             self.assertTrue(40 <= sol[5] <= 128)
 
-        # Build full 5-step program
+        # Build full 5-step program with Welding Torch
+        self.kin.set_active_tool(TOOL_PRESETS["WELDING_TORCH"])
         prog = RobotProgram(kinematics=self.kin, name="2-Click Weld Seam")
         prog.add_motion(sol_app, motion_type="PTP", speed_percent=100, comment="Approach")
-        prog.add_motion(sol_start, motion_type="LIN", speed_percent=50, comment="Touchdown / Arc On")
-        prog.add_motion(sol_end, motion_type="LIN", speed_percent=25, comment=f"Weld Seam ({seam_len:.1f} mm)")
+        prog.add_motion(sol_start, motion_type="LIN", speed_percent=50, comment="Touchdown / Arc On", is_welding=True)
+        prog.add_motion(sol_end, motion_type="LIN", speed_percent=25, comment=f"Weld Seam ({seam_len:.1f} mm)", is_welding=True)
         prog.add_delay(duration_ms=500, comment="Crater Fill")
         prog.add_motion(sol_retract, motion_type="LIN", speed_percent=80, comment="Retract")
 
@@ -220,6 +221,19 @@ class TestWorkpieceAndWelding(unittest.TestCase):
         self.assertGreater(len(traj), 10)
         weld_frames = [f for f in traj if f.is_welding]
         self.assertGreater(len(weld_frames), 0)
+
+    def test_gripper_linear_motion_does_not_weld(self):
+        """Verifies that when Gripper is active, linear moves never produce weld marks or seams."""
+        self.kin.set_active_tool(TOOL_PRESETS["GRIPPER"])
+        prog = RobotProgram(kinematics=self.kin, name="Gripper Transfer")
+        prog.add_motion([90, 80, 100, 90, 90, 40], motion_type="PTP", comment="Approach")
+        prog.add_motion([90, 90, 110, 90, 90, 40], motion_type="LIN", comment="Descend to Part")
+        prog.add_gripper(action="CLOSE", target_angle=128)
+        prog.add_motion([90, 80, 100, 90, 90, 128], motion_type="LIN", comment="Lift Part")
+
+        traj = prog.generate_full_trajectory([90, 90, 90, 90, 90, 40])
+        weld_frames = [f for f in traj if f.is_welding]
+        self.assertEqual(len(weld_frames), 0, "Gripper linear motions must NEVER produce weld marks or beads!")
 
 
 class TestUXAndSafety(unittest.TestCase):

@@ -584,6 +584,7 @@ class ArmVisualizer3D(QWidget):
         # 2. Extract TCP points and orientation frames for each waypoint
         tcp_points = []
         has_collision = False
+        is_torch = bool(self.active_tool and getattr(self.active_tool, "tool_type", "") == "WELDING_TORCH")
 
         for i, item in enumerate(motion_items):
             pose = kinematics.forward_kinematics([float(a) for a in item.angles])
@@ -595,11 +596,16 @@ class ArmVisualizer3D(QWidget):
             if is_collision:
                 has_collision = True
 
-            # Waypoint Marker Sphere
+            # Waypoint Marker Sphere (Only orange if tool is torch AND it's a weld point)
+            is_weld_item = is_torch and (getattr(item, "is_welding", False) or any(w in getattr(item, "comment", "").lower() for w in ["weld", "hitsaus", "sauma", "arc on", "pendlaus"]))
             if is_collision:
                 color = "#ff1744"  # Bright Red for collision
+            elif is_weld_item:
+                color = "#ff9800"  # Orange for active weld seam waypoint
+            elif m_type == "LIN":
+                color = "#00bcd4"  # Clean Cyan for normal linear transfer
             else:
-                color = "#ff9800" if m_type == "LIN" else "#00e5ff"
+                color = "#38bdf8"  # Sky blue for PTP
 
             sphere = pv.Sphere(radius=5.5, center=pt)
             sphere_act = self.plotter.add_mesh(
@@ -636,18 +642,31 @@ class ArmVisualizer3D(QWidget):
                 continue
 
             m_type_curr = getattr(item_curr, "statement_type", getattr(item_curr, "motion_type", "PTP"))
+            is_weld_curr = is_torch and (getattr(item_curr, "is_welding", False) or any(w in getattr(item_curr, "comment", "").lower() for w in ["weld", "hitsaus", "sauma", "arc on", "pendlaus"]))
 
             if m_type_curr == "LIN":
-                # LINEAR straight line: precision Cartesian tube (orange welding seam)
-                line = pv.Line(p_start, p_end)
-                tube = line.tube(radius=2.2, n_sides=16)
-                tube_act = self.plotter.add_mesh(
-                    tube,
-                    color="#ff9800",
-                    ambient=0.85,
-                    opacity=0.88,
-                    smooth_shading=True
-                )
+                if is_weld_curr:
+                    # LINEAR straight welding seam: orange welding bead tube
+                    line = pv.Line(p_start, p_end)
+                    tube = line.tube(radius=2.2, n_sides=16)
+                    tube_act = self.plotter.add_mesh(
+                        tube,
+                        color="#ff9800",
+                        ambient=0.85,
+                        opacity=0.88,
+                        smooth_shading=True
+                    )
+                else:
+                    # LINEAR transport motion (Gripper, Vacuum, Dispenser): sleek cyan trajectory tube
+                    line = pv.Line(p_start, p_end)
+                    tube = line.tube(radius=1.2, n_sides=12)
+                    tube_act = self.plotter.add_mesh(
+                        tube,
+                        color="#0284c7",
+                        ambient=0.8,
+                        opacity=0.75,
+                        smooth_shading=True
+                    )
                 self.trajectory_actors.append(tube_act)
             else:
                 # PTP arc: sample intermediate robot joint angles via S-curve

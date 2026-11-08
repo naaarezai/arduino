@@ -63,6 +63,9 @@ class MainWindow(QMainWindow):
 
         self._init_ui()
         self.kinematics.set_active_tool(self.visualizer_3d.active_tool)
+        self.statement_tree.set_active_tool(self.visualizer_3d.active_tool)
+        if hasattr(self, "btn_2click_seam"):
+            self.btn_2click_seam.setVisible(self.visualizer_3d.active_tool.tool_type == "WELDING_TORCH")
         self._setup_shortcuts()
         self._connect_signals()
 
@@ -640,6 +643,12 @@ class MainWindow(QMainWindow):
         self.visualizer_3d.set_active_tool(tool)
         if hasattr(self, "lbl_tool_badge"):
             self.lbl_tool_badge.setText(f"🔧 {tool.name}")
+        if hasattr(self, "statement_tree"):
+            self.statement_tree.set_active_tool(tool)
+        if hasattr(self, "btn_2click_seam"):
+            self.btn_2click_seam.setVisible(tool.tool_type == "WELDING_TORCH")
+        if hasattr(self, "visualizer_3d") and hasattr(self, "program"):
+            self.visualizer_3d.update_trajectory_path(self.program.statements, self.kinematics)
         sim_angles = self._get_current_sim_angles()
         self._on_angles_changed(sim_angles, sim_angles)
         self.status_bar.showMessage(

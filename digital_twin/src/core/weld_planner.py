@@ -127,7 +127,8 @@ def generate_industrial_weld_sequence(p_start: Tuple[float, float, float],
                 statement_type="LIN",
                 angles=sol_w,
                 speed_percent=speed_percent,
-                comment=f"Pendlaus {weave_type} ({i+1}/{len(weave_pts)-1})"
+                comment=f"Pendlaus {weave_type} ({i+1}/{len(weave_pts)-1})",
+                is_welding=True
             ))
             prev_sol = sol_w
         last_sol = prev_sol
@@ -140,7 +141,8 @@ def generate_industrial_weld_sequence(p_start: Tuple[float, float, float],
             statement_type="LIN",
             angles=sol_end,
             speed_percent=speed_percent,
-            comment=f"Hitsaussauma LIN ({seam_len:.1f} mm)"
+            comment=f"Hitsaussauma LIN ({seam_len:.1f} mm)",
+            is_welding=True
         ))
         last_sol = sol_end
 
