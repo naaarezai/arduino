@@ -65,3 +65,4 @@ def load_project_from_file(file_path: Path) -> Dict[str, Any]:
     if "program" not in data:
         raise ValueError("Virheellinen projektitiedosto: 'program'-kenttä puuttuu.")
     return data
+

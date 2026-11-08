@@ -612,6 +612,10 @@ class StatementTreePanel(QGroupBox):
 
     def highlight_statement(self, index: int) -> None:
         """Visually marks current running statement during simulation."""
+        if getattr(self, "_last_highlighted_index", -1) == index:
+            return
+        self._last_highlighted_index = index
+
         root = self.tree.topLevelItem(0)
         if not root:
             return

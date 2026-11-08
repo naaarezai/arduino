@@ -268,3 +268,4 @@ def reverse_seam_statements(statements: List[Statement]) -> List[Statement]:
     new_statements.insert(len(new_statements) - 1, delay)
 
     return new_statements
+

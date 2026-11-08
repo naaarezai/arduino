@@ -157,3 +157,4 @@ class CodePreviewPanel(QWidget):
                 Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
             except Exception:
                 pass
+

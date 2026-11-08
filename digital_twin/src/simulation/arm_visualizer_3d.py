@@ -39,7 +39,7 @@ class ArmVisualizer3D(QWidget):
         # Style plotter environment
         self.plotter.set_background("#16181c", top="#242830")  # Professional dark studio gradient
         self.plotter.show_axes()
-        self.plotter.enable_anti_aliasing()
+        self.plotter.enable_anti_aliasing('fxaa')
 
         # Industrial studio lighting setup
         light_key = pv.Light(position=(900, -900, 1200), focal_point=(0, 0, 200), intensity=0.85, color="white")
@@ -449,12 +449,15 @@ class ArmVisualizer3D(QWidget):
         for act in self.tcp_triad_actors:
             act.user_matrix = mat_flange
 
-        # If Gizmo is active and not currently being dragged by the mouse, sync it to TCP
-        if self.gizmo_widget and not getattr(self, "_is_dragging_gizmo", False):
-            try:
-                self.gizmo_widget.SetCenter(tuple(self._current_tcp))
-            except Exception:
-                pass
+        # If Gizmo is active, sync it to TCP when not actively being dragged (watchdog < 70ms)
+        if self.gizmo_widget:
+            is_actively_dragging = getattr(self, "_is_dragging_gizmo", False) and (time.perf_counter() - getattr(self, "_last_drag_time", 0.0) < 0.07)
+            if not is_actively_dragging:
+                self._is_dragging_gizmo = False
+                try:
+                    self.gizmo_widget.SetCenter(tuple(self._current_tcp))
+                except Exception:
+                    pass
 
         self.plotter.render()
 
@@ -477,6 +480,7 @@ class ArmVisualizer3D(QWidget):
         self.gizmo_widget = None
         self._is_dragging_gizmo = False
         self._last_drag_time = 0.0
+        self._last_solved_drag_time = 0.0
 
         if not enabled or not on_jog_callback or not kinematics or not get_angles_fn:
             self.plotter.render()
@@ -484,15 +488,18 @@ class ArmVisualizer3D(QWidget):
 
         def _on_gizmo_drag(center):
             now = time.perf_counter()
-            # Throttle drag updates to ~60 FPS (16ms) to prevent UI event queue starvation
-            if now - self._last_drag_time < 0.016:
-                return
+            self._is_dragging_gizmo = True
             self._last_drag_time = now
+
+            # Throttle drag updates to ~60 FPS (16ms) to prevent UI event queue starvation
+            if now - getattr(self, "_last_solved_drag_time", 0.0) < 0.016:
+                return
+            self._last_solved_drag_time = now
 
             x, y, z = center
             angles = get_angles_fn()
 
-            sol, _ = kinematics.solve_ik_clamped(
+            sol, actual_pt = kinematics.solve_ik_clamped(
                 float(x), float(y), float(z),
                 current_angles=angles
             )
@@ -501,6 +508,7 @@ class ArmVisualizer3D(QWidget):
 
         def _on_gizmo_start(widget, event):
             self._is_dragging_gizmo = True
+            self._last_drag_time = time.perf_counter()
 
         def _on_gizmo_end(widget, event):
             self._is_dragging_gizmo = False
@@ -508,7 +516,7 @@ class ArmVisualizer3D(QWidget):
             try:
                 center = widget.GetCenter()
                 angles = get_angles_fn()
-                sol, _ = kinematics.solve_ik_clamped(
+                sol, actual_pt = kinematics.solve_ik_clamped(
                     float(center[0]), float(center[1]), float(center[2]),
                     current_angles=angles
                 )
@@ -879,7 +887,6 @@ class ArmVisualizer3D(QWidget):
             )
             self.weld_bead_actors.append(actor)
             self.weld_points.append(list(pt))
-            self.plotter.render()
         except Exception:
             pass
 
@@ -915,6 +922,10 @@ class ArmVisualizer3D(QWidget):
 
     def set_collision_highlight(self, is_collision: bool) -> None:
         """Highlights the robot arm links in collision warning red."""
+        if getattr(self, "_last_collision_state", None) == is_collision:
+            return
+        self._last_collision_state = is_collision
+
         orig_colors = ["#25282e", "#374151", "#0284c7", "#e2e8f0", "#ea580c"]
         for i, act in enumerate(self.actors):
             if hasattr(act, "prop"):

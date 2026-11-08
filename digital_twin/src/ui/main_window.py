@@ -514,7 +514,6 @@ class MainWindow(QMainWindow):
 
     def _apply_angles_to_arm(self, angles: List[int]) -> None:
         self.slider_panel.set_angles(angles)
-        self.compact_jog.sync_angles(angles)
 
     def _on_angles_changed(self, sim_angles: List[int], physical_angles: List[int]) -> None:
         """Called whenever arm angles change (Gizmo, Jog, Program double click, simulation)."""
@@ -527,43 +526,59 @@ class MainWindow(QMainWindow):
         self.visualizer_3d.set_collision_highlight(has_coll)
         sing_msg = self.kinematics.check_singularity(sim_angles)
 
-        # 3. Update HUD coordinates and warnings
+        # 3. Update HUD coordinates and warnings (cached stylesheet to eliminate UI lag)
+        hud_state = "coll" if has_coll else ("sing" if sing_msg else "normal")
+        if hud_state != getattr(self, "_last_hud_state", ""):
+            self._last_hud_state = hud_state
+            if has_coll:
+                self.hud_label.setStyleSheet("QLabel { background: #3b1111; color: #ff5252; font-family: Consolas, monospace; font-weight: 600; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #ff1744; }")
+            elif sing_msg:
+                self.hud_label.setStyleSheet("QLabel { background: #3b2d11; color: #ffd600; font-family: Consolas, monospace; font-weight: 600; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #ffab00; }")
+            else:
+                self.hud_label.setStyleSheet("QLabel { background: #1e1e1e; color: #4fc1ff; font-family: Consolas, monospace; font-weight: 600; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #333333; }")
+
         hud_text = f"TCP: X: {pose.tcp_x:6.1f} mm | Y: {pose.tcp_y:6.1f} mm | Z: {pose.tcp_z:6.1f} mm | Pitch: {pose.pitch_deg:5.1f}°"
         if has_coll:
             hud_text += f" | TÖRMÄYS: {coll_msg}"
-            self.hud_label.setStyleSheet("QLabel { background: #3b1111; color: #ff5252; font-family: Consolas, monospace; font-weight: 600; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #ff1744; }")
         elif sing_msg:
             hud_text += f" | VAROITUS: {sing_msg}"
-            self.hud_label.setStyleSheet("QLabel { background: #3b2d11; color: #ffd600; font-family: Consolas, monospace; font-weight: 600; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #ffab00; }")
-        else:
-            self.hud_label.setStyleSheet("QLabel { background: #1e1e1e; color: #4fc1ff; font-family: Consolas, monospace; font-weight: 600; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #333333; }")
         self.hud_label.setText(hud_text)
 
         # 4. Sync compact jog panel values
         self.compact_jog.sync_angles(sim_angles)
 
-        # 5. Update joint badges with color-coding near limits
+        # 5. Update joint badges with color-coding near limits (cached to eliminate CSS string re-parsing lag)
         if hasattr(self, "joint_labels") and self.joint_labels:
+            if not hasattr(self, "_last_joint_states"):
+                self._last_joint_states = [""] * 6
+
             for i, val in enumerate(sim_angles[:6]):
                 min_v, max_v = JOINT_LIMITS[i]
                 dist_to_limit = min(abs(val - min_v), abs(val - max_v))
                 if dist_to_limit <= 1:
+                    state_key = "danger"
                     color = "#ff5252"
                     bg = "#3b1111"
                 elif dist_to_limit <= 15:
+                    state_key = "warning"
                     color = "#ffd600"
                     bg = "#3b2d11"
                 else:
+                    state_key = "normal"
                     color = "#69f0ae"
                     bg = "#1b2d20"
+
                 tag = f"J{i+1}: {val}°"
                 if i == 5:
                     tag += " (Koura)"
                 self.joint_labels[i].setText(tag)
-                self.joint_labels[i].setStyleSheet(
-                    f"QLabel {{ background: {bg}; color: {color}; font-family: Consolas, monospace; "
-                    f"font-size: 11px; font-weight: 600; padding: 2px 7px; border: 1px solid {color}; border-radius: 3px; }}"
-                )
+
+                if self._last_joint_states[i] != state_key:
+                    self._last_joint_states[i] = state_key
+                    self.joint_labels[i].setStyleSheet(
+                        f"QLabel {{ background: {bg}; color: {color}; font-family: Consolas, monospace; "
+                        f"font-size: 11px; font-weight: 600; padding: 2px 7px; border: 1px solid {color}; border-radius: 3px; }}"
+                    )
 
         # 6. Stream calibrated angles to Arduino if online and not running batch sequence
         if self.is_online and not self.stream_timer.isActive() and not self.sim_panel.timer.isActive():
