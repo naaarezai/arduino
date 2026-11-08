@@ -160,7 +160,8 @@ class XyzControllerPanel(QGroupBox):
             pitch_deg=target_pitch,
             roll_deg=roll,
             gripper_deg=gripper,
-            auto_adjust_pitch=True
+            auto_adjust_pitch=True,
+            current_angles=angles
         )
 
         if sol is not None:

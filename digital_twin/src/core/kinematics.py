@@ -176,24 +176,45 @@ class RobotKinematics:
                            pitch_deg: float = 0.0,
                            roll_deg: float = 90.0,
                            gripper_deg: float = 40.0,
-                           auto_adjust_pitch: bool = True) -> Optional[List[int]]:
+                           auto_adjust_pitch: bool = True,
+                           current_angles: Optional[List[int]] = None) -> Optional[List[int]]:
         """
         Analytical Inverse Kinematics solver.
         Calculates J1..J6 joint angles to place TCP at (X, Y, Z) with given pitch angle.
-        Supports automatic pitch fallback if exact orientation is out of reach.
+        Supports automatic pitch fallback across full physical range (-85° .. +85°).
+        Minimizes joint angular displacement from current_angles if provided to ensure smooth motion.
         """
-        res = self._solve_exact_ik(x, y, z, pitch_deg, roll_deg, gripper_deg)
+        res = self._solve_exact_ik(x, y, z, pitch_deg, roll_deg, gripper_deg, current_angles=current_angles)
         if res is not None:
-            return res
+            if current_angles is None:
+                return res
+            d = sum((res[i] - current_angles[i]) ** 2 for i in range(min(5, len(current_angles))))
+            if d < 400:  # < 20 deg per joint average
+                return res
 
         if auto_adjust_pitch:
-            # Try searching nearby pitch angles (±5° .. ±40°)
-            for delta in range(5, 45, 5):
-                for sign in (-1, 1):
+            best_sol = res
+            min_dist = float("inf") if res is None else sum((res[i] - current_angles[i]) ** 2 for i in range(min(5, len(current_angles)))) if current_angles else 0.0
+
+            # Search nearby pitch angles across full physical range (-85° .. +85°) in 5° steps
+            for delta in range(5, 90, 5):
+                for sign in (1, -1):
                     alt_pitch = pitch_deg + delta * sign
-                    res = self._solve_exact_ik(x, y, z, alt_pitch, roll_deg, gripper_deg)
-                    if res is not None:
-                        return res
+                    if -85.0 <= alt_pitch <= 85.0:
+                        alt_res = self._solve_exact_ik(x, y, z, alt_pitch, roll_deg, gripper_deg, current_angles=current_angles)
+                        if alt_res is not None:
+                            if current_angles is None:
+                                return alt_res
+                            dist = sum((alt_res[i] - current_angles[i]) ** 2 for i in range(min(5, len(current_angles))))
+                            if dist < min_dist:
+                                min_dist = dist
+                                best_sol = alt_res
+                            # Early return if solution is very close to current posture
+                            if dist < 400:
+                                return best_sol
+
+            if best_sol is not None:
+                return best_sol
 
         return None
 
@@ -203,7 +224,8 @@ class RobotKinematics:
                         z: float,
                         pitch_deg: float,
                         roll_deg: float,
-                        gripper_deg: float) -> Optional[List[int]]:
+                        gripper_deg: float,
+                        current_angles: Optional[List[int]] = None) -> Optional[List[int]]:
         """Core analytical IK for a 3-link planar arm with turntable base."""
         # 1. Turntable base (J1)
         r_target = math.sqrt(x * x + y * y)
@@ -251,8 +273,6 @@ class RobotKinematics:
         s6 = int(round(max(40.0, min(128.0, gripper_deg))))
 
         sol = [s1, s2, s3, s4, s5, s6]
-        if all(0 <= sol[i] <= 180 for i in range(5)):
-            return sol
 
         # Branch 2: Inverted elbow configuration
         th2_alt = alpha + beta
@@ -264,10 +284,86 @@ class RobotKinematics:
         s4_alt = int(round(90.0 + math.degrees(th4_alt)))
 
         sol_alt = [s1, s2_alt, s3_alt, s4_alt, s5, s6]
-        if all(0 <= sol_alt[i] <= 180 for i in range(5)):
-            return sol_alt
 
-        return None
+        valid_sols = []
+        if all(0 <= sol[i] <= 180 for i in range(5)):
+            valid_sols.append(sol)
+        if all(0 <= sol_alt[i] <= 180 for i in range(5)):
+            valid_sols.append(sol_alt)
+
+        if not valid_sols:
+            return None
+
+        if len(valid_sols) == 1 or current_angles is None:
+            return valid_sols[0]
+
+        # Choose the branch closest to current joint angles to prevent jumping
+        def dist_sq_fn(s):
+            return sum((s[i] - current_angles[i]) ** 2 for i in range(min(5, len(current_angles))))
+        return min(valid_sols, key=dist_sq_fn)
+
+    def solve_ik_clamped(self,
+                         x: float,
+                         y: float,
+                         z: float,
+                         current_angles: List[int],
+                         preferred_pitch: Optional[float] = None) -> Tuple[Optional[List[int]], Tuple[float, float, float]]:
+        """
+        Robust IK solver with reach boundary clamping for Interactive 3D Gizmo dragging.
+        If target (X, Y, Z) is outside reach, smoothly projects/clamps the target along
+        the ray from the current TCP to find the furthest reachable point toward the cursor.
+        The robot arm NEVER freezes or locks up when dragging outside workspace limits.
+        Returns: (solution_angles, (actual_x, actual_y, actual_z))
+        """
+        pose = self.forward_kinematics([float(a) for a in current_angles])
+        cur_x, cur_y, cur_z = pose.tcp_x, pose.tcp_y, pose.tcp_z
+        pitch = preferred_pitch if preferred_pitch is not None else pose.pitch_deg
+        roll = float(current_angles[4]) if len(current_angles) > 4 else 90.0
+        grip = float(current_angles[5]) if len(current_angles) > 5 else 40.0
+
+        # Safe Z floor limit (table height protection)
+        safe_z = max(5.0, float(z))
+        target_x = float(x)
+        target_y = float(y)
+
+        # 1. Try target directly
+        sol = self.inverse_kinematics(
+            target_x, target_y, safe_z,
+            pitch_deg=pitch, roll_deg=roll, gripper_deg=grip,
+            auto_adjust_pitch=True, current_angles=current_angles
+        )
+        if sol is not None:
+            return sol, (target_x, target_y, safe_z)
+
+        # 2. Target is outside reach: binary search along line segment from current TCP to target
+        p_cur = np.array([cur_x, cur_y, cur_z], dtype=np.float64)
+        p_tgt = np.array([target_x, target_y, safe_z], dtype=np.float64)
+
+        low = 0.0
+        high = 1.0
+        best_sol = None
+        best_pt = p_cur
+
+        for _ in range(8):
+            mid = (low + high) * 0.5
+            p_mid = (1.0 - mid) * p_cur + mid * p_tgt
+            s = self.inverse_kinematics(
+                float(p_mid[0]), float(p_mid[1]), float(p_mid[2]),
+                pitch_deg=pitch, roll_deg=roll, gripper_deg=grip,
+                auto_adjust_pitch=True, current_angles=current_angles
+            )
+            if s is not None:
+                best_sol = s
+                best_pt = p_mid
+                low = mid  # Try reaching further toward target
+            else:
+                high = mid # Pull back toward known reachable position
+
+        if best_sol is not None:
+            return best_sol, (float(best_pt[0]), float(best_pt[1]), float(best_pt[2]))
+
+        # Fallback to current angles
+        return list(current_angles), (cur_x, cur_y, cur_z)
 
     def generate_linear_path(self,
                              start_angles: List[int],

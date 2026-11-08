@@ -212,7 +212,8 @@ class CompactJogPanel(QGroupBox):
         sol = self.kinematics.inverse_kinematics(
             target_x, target_y, target_z,
             pitch_deg=target_pitch, roll_deg=roll, gripper_deg=gripper,
-            auto_adjust_pitch=True
+            auto_adjust_pitch=True,
+            current_angles=angles
         )
         if sol is not None:
             self.apply_angles(sol)

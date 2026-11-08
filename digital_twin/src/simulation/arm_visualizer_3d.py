@@ -6,6 +6,7 @@ with animated opening/closing gripper fingers and hardware-accelerated 60 FPS po
 from pathlib import Path
 from typing import Dict, List, Optional
 import math
+import time
 import numpy as np
 import pyvista as pv
 from pyvistaqt import QtInteractor
@@ -66,6 +67,8 @@ class ArmVisualizer3D(QWidget):
         self.envelope_actor: Optional[pv.Actor] = None
         self.trajectory_actors: List[pv.Actor] = []
         self.gizmo_widget = None
+        self._is_dragging_gizmo: bool = False
+        self._last_drag_time: float = 0.0
         self._current_tcp = [0.0, 0.0, 688.3]
 
         # Add floor grid plane
@@ -424,6 +427,13 @@ class ArmVisualizer3D(QWidget):
             t_tcp[2, 3] = pose.tcp_z
             self.tcp_actor.user_matrix = t_tcp
 
+        # If Gizmo is active and not currently being dragged by the mouse, sync it to TCP
+        if self.gizmo_widget and not getattr(self, "_is_dragging_gizmo", False):
+            try:
+                self.gizmo_widget.SetCenter(tuple(self._current_tcp))
+            except Exception:
+                pass
+
         self.plotter.render()
 
     def set_gizmo_enabled(self,
@@ -435,31 +445,57 @@ class ArmVisualizer3D(QWidget):
         Activates or deactivates the 3D Interactive TCP Jog Gizmo.
         When active, the user can click and drag the 3D sphere directly with the mouse
         in the 3D viewport to manipulate the robot arm using Inverse Kinematics.
+        Equipped with reach boundary clamping and 60 FPS event throttling to eliminate
+        freezing, lag, and dead zones.
         """
         try:
             self.plotter.clear_sphere_widgets()
         except Exception:
             pass
         self.gizmo_widget = None
+        self._is_dragging_gizmo = False
+        self._last_drag_time = 0.0
 
         if not enabled or not on_jog_callback or not kinematics or not get_angles_fn:
             self.plotter.render()
             return
 
         def _on_gizmo_drag(center):
+            now = time.perf_counter()
+            # Throttle drag updates to ~60 FPS (16ms) to prevent UI event queue starvation
+            if now - self._last_drag_time < 0.016:
+                return
+            self._last_drag_time = now
+
             x, y, z = center
             angles = get_angles_fn()
-            roll = float(angles[4]) if len(angles) > 4 else 90.0
-            grip = float(angles[5]) if len(angles) > 5 else 40.0
-            safe_z = max(5.0, float(z))
 
-            sol = kinematics.inverse_kinematics(
-                float(x), float(y), safe_z,
-                pitch_deg=0.0, roll_deg=roll, gripper_deg=grip,
-                auto_adjust_pitch=True
+            sol, _ = kinematics.solve_ik_clamped(
+                float(x), float(y), float(z),
+                current_angles=angles
             )
             if sol is not None:
                 on_jog_callback(sol)
+
+        def _on_gizmo_start(widget, event):
+            self._is_dragging_gizmo = True
+
+        def _on_gizmo_end(widget, event):
+            self._is_dragging_gizmo = False
+            # On release, perform final solve and snap the gizmo sphere to the actual reached TCP
+            try:
+                center = widget.GetCenter()
+                angles = get_angles_fn()
+                sol, _ = kinematics.solve_ik_clamped(
+                    float(center[0]), float(center[1]), float(center[2]),
+                    current_angles=angles
+                )
+                if sol is not None:
+                    on_jog_callback(sol)
+                widget.SetCenter(tuple(self._current_tcp))
+                self.plotter.render()
+            except Exception:
+                pass
 
         try:
             self.gizmo_widget = self.plotter.add_sphere_widget(
@@ -470,6 +506,12 @@ class ArmVisualizer3D(QWidget):
                 selected_color="#ff4081",
                 interaction_event="always"
             )
+            if self.gizmo_widget:
+                try:
+                    self.gizmo_widget.AddObserver("StartInteractionEvent", _on_gizmo_start)
+                    self.gizmo_widget.AddObserver("EndInteractionEvent", _on_gizmo_end)
+                except Exception:
+                    pass
         except Exception as e:
             # Fallback with interaction_event='end'
             try:

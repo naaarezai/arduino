@@ -65,6 +65,27 @@ class TestKinematics(unittest.TestCase):
         has_coll_safe, _ = self.kin.check_collision(safe_pose)
         self.assertFalse(has_coll_safe)
 
+    def test_inverse_kinematics_full_pitch_range(self):
+        """Verifies that full pitch range (-85° .. +85°) enables solutions at close radii."""
+        # Radius 260 at Z=200 requires pitch ~ -70° to -80°
+        sol = self.kin.inverse_kinematics(260.0, 0.0, 200.0, pitch_deg=0.0, auto_adjust_pitch=True)
+        self.assertIsNotNone(sol, "Should find IK solution using expanded pitch search")
+        self.assertTrue(all(0 <= sol[i] <= 180 for i in range(5)))
+
+    def test_solve_ik_clamped_boundary_projection(self):
+        """Verifies that out-of-reach drag targets never freeze and clamp to valid boundary."""
+        cur = [90, 90, 90, 90, 90, 40]
+        # Target far out of reach (X=700 mm)
+        sol_far, pt_far = self.kin.solve_ik_clamped(700.0, 0.0, 200.0, current_angles=cur)
+        self.assertIsNotNone(sol_far, "Clamped IK must never return None on out-of-reach target")
+        self.assertLess(pt_far[0], 700.0, "Clamped point should be projected closer")
+        self.assertTrue(all(0 <= sol_far[i] <= 180 for i in range(5)))
+
+        # Target in inner dead zone (X=30 mm, Z=80 mm)
+        sol_inner, pt_inner = self.kin.solve_ik_clamped(30.0, 0.0, 80.0, current_angles=cur)
+        self.assertIsNotNone(sol_inner, "Clamped IK must never return None on inner dead zone target")
+        self.assertTrue(all(0 <= sol_inner[i] <= 180 for i in range(5)))
+
 
 class TestCalibrationManager(unittest.TestCase):
     def test_trim_and_inversion(self):
