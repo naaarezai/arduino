@@ -4,6 +4,7 @@ Provides transport controls (Play, Pause, Stop), speed multipliers (0.5x, 1x, 2x
 timeline progress, and Arduino execution.
 """
 from typing import Callable, List, Optional
+import numpy as np
 from src.core.program import RobotProgram, TrajectoryFrame
 from src.ui.qt_compat import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -125,14 +126,43 @@ class SimulationControlPanel(QGroupBox):
         row_speed.addStretch()
         layout.addLayout(row_speed)
 
-        # 3. Timeline / Progress Bar
+        # 3. Interactive Timeline Scrubber & Progress Bar
+        time_hdr = QHBoxLayout()
+        lbl_timeline = QLabel("Aikajana (Scrubber):")
+        lbl_timeline.setStyleSheet("color: #858585; font-size: 11px; font-weight: 600;")
+        time_hdr.addWidget(lbl_timeline)
+        self.lbl_time_val = QLabel("0.0 s / 0.0 s")
+        self.lbl_time_val.setStyleSheet("color: #4fc1ff; font-family: Consolas, monospace; font-size: 11px;")
+        time_hdr.addStretch()
+        time_hdr.addWidget(self.lbl_time_val)
+        layout.addLayout(time_hdr)
+
+        self.timeline_slider = QSlider(Qt.Horizontal)
+        self.timeline_slider.setRange(0, 100)
+        self.timeline_slider.setValue(0)
+        self.timeline_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 6px; background: #181818; border: 1px solid #333333; border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #007acc; border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #4fc1ff; border: 1px solid #ffffff; width: 14px;
+                margin-top: -4px; margin-bottom: -4px; border-radius: 7px;
+            }
+            QSlider::handle:horizontal:hover { background: #ffffff; }
+        """)
+        self.timeline_slider.sliderMoved.connect(self._on_slider_scrub)
+        layout.addWidget(self.timeline_slider)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
-                background: #181818; border: 1px solid #333333; border-radius: 2px; height: 10px;
+                background: #181818; border: 1px solid #333333; border-radius: 2px; height: 6px;
             }
             QProgressBar::chunk {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #007acc, stop:1 #4fc1ff);
@@ -145,12 +175,18 @@ class SimulationControlPanel(QGroupBox):
         self.lbl_status.setStyleSheet("color: #858585; font-size: 11px;")
         layout.addWidget(self.lbl_status)
 
-        # 4. Production Loop & Weld Trace Controls
+        # 4. Production Loop, Dry Run & Weld Trace Controls
         row_prod = QHBoxLayout()
         row_prod.setSpacing(6)
-        self.chk_loop = QCheckBox("Loop Routine (Continuous)")
+        self.chk_loop = QCheckBox("Loop (Jatkuva)")
         self.chk_loop.setStyleSheet("color: #d4d4d4; font-size: 11px; font-weight: 600;")
         row_prod.addWidget(self.chk_loop)
+
+        self.chk_dry_run = QCheckBox("🛡 Turva-ajo (Dry Run)")
+        self.chk_dry_run.setToolTip("Aja 25% nopeudella ilman hitsauspolttimen/kouran laukaisua")
+        self.chk_dry_run.setStyleSheet("color: #69f0ae; font-size: 11px; font-weight: 600;")
+        self.chk_dry_run.toggled.connect(self._on_dry_run_toggled)
+        row_prod.addWidget(self.chk_dry_run)
 
         self.lbl_cycles = QLabel("Cycles: 0")
         self.lbl_cycles.setStyleSheet("color: #4fc1ff; font-family: Consolas, monospace; font-size: 11px; font-weight: bold;")
@@ -158,7 +194,7 @@ class SimulationControlPanel(QGroupBox):
 
         row_prod.addStretch()
 
-        self.btn_clear_weld = QPushButton("Clear Weld Trace")
+        self.btn_clear_weld = QPushButton("Tyhjennä saumat")
         self.btn_clear_weld.setStyleSheet("""
             QPushButton {
                 background: #252526; color: #ff9100; font-size: 11px; font-weight: 600;
@@ -195,15 +231,60 @@ class SimulationControlPanel(QGroupBox):
         self.timer.setInterval(max(10, int(base_interval / multiplier)))
 
     def update_program_stats(self) -> None:
-        """Calculates estimated cycle time and displays summary."""
+        """Calculates estimated cycle time and displays summary with welding seam length."""
         if not self.program.statements:
             self.lbl_status.setText("Valmis simulaatioon (0 käskyä).")
+            self.lbl_time_val.setText("0.0 s / 0.0 s")
             return
 
         current_angles = self.get_angles()
         traj = self.program.generate_full_trajectory(current_angles, speed_multiplier=1.0)
         est_seconds = len(traj) * 0.035
-        self.lbl_status.setText(f"Arvioitu sykliaika: {est_seconds:.1f} s | {len(self.program.statements)} käskyä | {len(traj)} interpolaatioaskelta")
+
+        # Calculate total weld seam distance (mm)
+        weld_len_mm = 0.0
+        prev_pt = None
+        for stmt in self.program.statements:
+            if hasattr(stmt, "angles"):
+                pose = self.program.kinematics.forward_kinematics([float(a) for a in stmt.angles])
+                cur_pt = np.array([pose.tcp_x, pose.tcp_y, pose.tcp_z], dtype=np.float64)
+                if hasattr(stmt, "statement_type") and stmt.statement_type == "LIN" and prev_pt is not None:
+                    weld_len_mm += float(np.linalg.norm(cur_pt - prev_pt))
+                prev_pt = cur_pt
+
+        self.lbl_time_val.setText(f"0.0 s / {est_seconds:.1f} s")
+        self.lbl_status.setText(
+            f"⏱ Sykliaika: {est_seconds:.1f} s | ⚡ Saumapituus: {weld_len_mm:.1f} mm | {len(self.program.statements)} käskyä ({len(traj)} askelta)"
+        )
+
+    def _on_slider_scrub(self, value: int) -> None:
+        """Allows scrubbing through simulation trajectory frame by frame with slider."""
+        if not self._trajectory:
+            current_angles = self.get_angles()
+            self._trajectory = self.program.generate_full_trajectory(current_angles, speed_multiplier=1.0)
+        if not self._trajectory:
+            return
+
+        idx = int((value / 100.0) * (len(self._trajectory) - 1))
+        self._current_frame_idx = idx
+        frame = self._trajectory[idx]
+        self.apply_angles(frame.angles)
+        if self.on_frame_tick:
+            self.on_frame_tick(frame.statement_idx)
+        cur_sec = idx * 0.035
+        tot_sec = len(self._trajectory) * 0.035
+        self.lbl_time_val.setText(f"{cur_sec:.1f} s / {tot_sec:.1f} s")
+        self.progress_bar.setValue(value)
+        self.lbl_status.setText(f"Scrub: {frame.statement_label} ({value}%)")
+
+    def _on_dry_run_toggled(self, checked: bool) -> None:
+        """Toggles 25% safety velocity for dry-run verification."""
+        if checked:
+            self._set_speed(0.25)
+            self.lbl_status.setText("🛡 Turva-ajo aktivoitu: 25% nopeus.")
+        else:
+            self._set_speed(1.0)
+            self.lbl_status.setText("Normaali ajo (1.0x).")
 
     def play_simulation(self) -> None:
         if not self.program.statements:
@@ -261,13 +342,17 @@ class SimulationControlPanel(QGroupBox):
         frame = self._trajectory[self._current_frame_idx]
         self.apply_angles(frame.angles)
 
-        if frame.is_welding and self.on_weld_tick:
+        if frame.is_welding and self.on_weld_tick and not self.chk_dry_run.isChecked():
             self.on_weld_tick(frame.angles)
 
         # Update progress and statement highlight
         prog_pct = int((self._current_frame_idx + 1) * 100 / len(self._trajectory))
         self.progress_bar.setValue(prog_pct)
-        welding_tag = " [SEAM ACTIVE]" if frame.is_welding else ""
+        self.timeline_slider.setValue(prog_pct)
+        cur_sec = (self._current_frame_idx + 1) * 0.035
+        tot_sec = len(self._trajectory) * 0.035
+        self.lbl_time_val.setText(f"{cur_sec:.1f} s / {tot_sec:.1f} s")
+        welding_tag = " [SEAM ACTIVE]" if frame.is_welding and not self.chk_dry_run.isChecked() else ""
         self.lbl_status.setText(f"Ajo: {frame.statement_label}{welding_tag} ({prog_pct}%)")
 
         if self.on_frame_tick:

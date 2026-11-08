@@ -9,6 +9,7 @@ Implements Visual Components -style architecture:
 6. Live Arduino physical robot execution streaming
 """
 from typing import List, Optional
+from src.config import JOINT_LIMITS
 from src.core.calibration import CalibrationManager
 from src.core.kinematics import RobotKinematics
 from src.core.program import RobotProgram, MotionStatement
@@ -23,7 +24,7 @@ from src.ui.slider_panel import SliderPanel
 from src.ui.qt_compat import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QSplitter, QStatusBar, QMessageBox, Qt, QFrame, QPushButton,
-    QTabWidget, QTimer, QShortcut, QKeySequence, QFileDialog
+    QTabWidget, QTimer, QShortcut, QKeySequence, QFileDialog, QMenu
 )
 
 
@@ -68,6 +69,8 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+O"), self, self.statement_tree._load_program)
         QShortcut(QKeySequence("Delete"), self, self.statement_tree._delete_selected)
         QShortcut(QKeySequence("Ctrl+H"), self, lambda: self._apply_angles_to_arm([90, 90, 90, 90, 90, 40]))
+        QShortcut(QKeySequence("Esc"), self, self._emergency_stop)
+        QShortcut(QKeySequence("Ctrl+T"), self, self._open_tool_dialog)
 
     def _toggle_play_pause(self) -> None:
         if self.sim_panel.timer.isActive():
@@ -113,6 +116,20 @@ class MainWindow(QMainWindow):
 
         self.btn_tab_program.setChecked(True)
         ribbon_bar.addStretch()
+
+        # E-STOP Emergency Safety Button
+        self.btn_estop = QPushButton("⛔ HÄTÄ-SEIS (Esc)")
+        self.btn_estop.setToolTip("Pysäytä välittömästi kaikki robotin liikkeet ja sarjaliikenne [Esc]")
+        self.btn_estop.setStyleSheet("""
+            QPushButton {
+                background: #b71c1c; color: #ffffff; font-weight: bold; font-size: 11px;
+                border: 1px solid #ff1744; border-radius: 3px; padding: 5px 14px;
+            }
+            QPushButton:hover { background: #d32f2f; }
+            QPushButton:pressed { background: #7f0000; }
+        """)
+        self.btn_estop.clicked.connect(self._emergency_stop)
+        ribbon_bar.addWidget(self.btn_estop)
 
         # Online / Offline Badge
         self.lbl_conn_badge = QLabel("OFFLINE")
@@ -168,6 +185,28 @@ class MainWindow(QMainWindow):
         btn_part.clicked.connect(self._on_import_workpiece)
         view_bar.addWidget(btn_part)
 
+        # Demo fixtures dropdown button
+        btn_demo_fixture = QPushButton("📦 Esimerkkikappaleet ▼")
+        btn_demo_fixture.setStyleSheet(btn_style_cam)
+        menu_demo = QMenu(self)
+        menu_demo.setStyleSheet("""
+            QMenu { background: #252526; color: #cccccc; border: 1px solid #3f3f46; padding: 4px; font-size: 11px; }
+            QMenu::item { padding: 4px 18px; }
+            QMenu::item:selected { background: #007acc; color: white; border-radius: 2px; }
+        """)
+        act_plate = menu_demo.addAction("V-saumalevyt (V-Groove Seam)")
+        act_pipe = menu_demo.addAction("Putkiliitos (Pipe T-Joint)")
+        act_bracket = menu_demo.addAction("Kulmakiinnike (Corner Bracket)")
+        menu_demo.addSeparator()
+        act_clear_demo = menu_demo.addAction("Poista kappale (Clear Part)")
+
+        act_plate.triggered.connect(lambda: self._load_demo_fixture("WELD_PLATE"))
+        act_pipe.triggered.connect(lambda: self._load_demo_fixture("PIPE_JOINT"))
+        act_bracket.triggered.connect(lambda: self._load_demo_fixture("CORNER_BRACKET"))
+        act_clear_demo.triggered.connect(self._clear_workpiece)
+        btn_demo_fixture.setMenu(menu_demo)
+        view_bar.addWidget(btn_demo_fixture)
+
         btn_tool = QPushButton("Tool & TCP...")
         btn_tool.setStyleSheet(btn_style_cam)
         btn_tool.clicked.connect(self._open_tool_dialog)
@@ -207,6 +246,38 @@ class MainWindow(QMainWindow):
         """)
         view_bar.addWidget(self.hud_label)
         left_layout.addLayout(view_bar)
+
+        # Joint Angles & Tool Quick Dashboard Strip
+        joint_hud_bar = QHBoxLayout()
+        joint_hud_bar.setSpacing(4)
+
+        self.joint_labels = []
+        for i in range(6):
+            lbl_j = QLabel(f"J{i+1}: 90°" if i < 5 else "J6: 40°")
+            lbl_j.setStyleSheet("""
+                QLabel {
+                    background: #252526; color: #69f0ae; font-family: Consolas, monospace;
+                    font-size: 11px; font-weight: 600; padding: 2px 7px;
+                    border: 1px solid #333333; border-radius: 3px;
+                }
+            """)
+            self.joint_labels.append(lbl_j)
+            joint_hud_bar.addWidget(lbl_j)
+
+        self.lbl_tool_badge = QPushButton("🔧 Työkalu: 2-Leukakoura")
+        self.lbl_tool_badge.setToolTip("Klikkaa avataksesi työkalun ja TCP-asetusten hallinnan [Ctrl+T]")
+        self.lbl_tool_badge.setStyleSheet("""
+            QPushButton {
+                background: #1b2838; color: #4fc1ff; font-weight: 600; font-size: 11px;
+                border: 1px solid #007acc; border-radius: 3px; padding: 2px 8px;
+            }
+            QPushButton:hover { background: #007acc; color: white; }
+        """)
+        self.lbl_tool_badge.clicked.connect(self._open_tool_dialog)
+        joint_hud_bar.addWidget(self.lbl_tool_badge)
+
+        joint_hud_bar.addStretch()
+        left_layout.addLayout(joint_hud_bar)
 
         # 3D Viewport Widget
         self.visualizer_3d = ArmVisualizer3D(self)
@@ -394,7 +465,30 @@ class MainWindow(QMainWindow):
         # 4. Sync compact jog panel values
         self.compact_jog.sync_angles(sim_angles)
 
-        # 5. Stream calibrated angles to Arduino if online and not running batch sequence
+        # 5. Update joint badges with color-coding near limits
+        if hasattr(self, "joint_labels") and self.joint_labels:
+            for i, val in enumerate(sim_angles[:6]):
+                min_v, max_v = JOINT_LIMITS[i]
+                dist_to_limit = min(abs(val - min_v), abs(val - max_v))
+                if dist_to_limit <= 1:
+                    color = "#ff5252"
+                    bg = "#3b1111"
+                elif dist_to_limit <= 15:
+                    color = "#ffd600"
+                    bg = "#3b2d11"
+                else:
+                    color = "#69f0ae"
+                    bg = "#1b2d20"
+                tag = f"J{i+1}: {val}°"
+                if i == 5:
+                    tag += " (Koura)"
+                self.joint_labels[i].setText(tag)
+                self.joint_labels[i].setStyleSheet(
+                    f"QLabel {{ background: {bg}; color: {color}; font-family: Consolas, monospace; "
+                    f"font-size: 11px; font-weight: 600; padding: 2px 7px; border: 1px solid {color}; border-radius: 3px; }}"
+                )
+
+        # 6. Stream calibrated angles to Arduino if online and not running batch sequence
         if self.is_online and not self.stream_timer.isActive() and not self.sim_panel.timer.isActive():
             phys_calib = self.calibration.to_physical(sim_angles)
             self.serial_worker.send_angles(phys_calib)
@@ -446,12 +540,39 @@ class MainWindow(QMainWindow):
         """Applies new tool profile to kinematics engine, 3D visualizer, and HUD."""
         self.kinematics.set_active_tool(tool)
         self.visualizer_3d.set_active_tool(tool)
+        if hasattr(self, "lbl_tool_badge"):
+            self.lbl_tool_badge.setText(f"🔧 {tool.name}")
         sim_angles = self._get_current_sim_angles()
         self._on_angles_changed(sim_angles, sim_angles)
         self.status_bar.showMessage(
             f"Aktiivinen työkalu: {tool.name} (TCP X={tool.tcp_x:.1f}, Y={tool.tcp_y:.1f}, Z={tool.tcp_z:.1f} mm)",
             5000
         )
+
+    def _emergency_stop(self) -> None:
+        """Immediate hardware & simulation safety stop (E-STOP)."""
+        self.sim_panel.stop_simulation()
+        if self.is_online:
+            self.serial_worker.emergency_stop()
+        self.status_bar.showMessage("⛔ HÄTÄ-SEIS AKTIIVINEN! Kaikki liike ja sarjaliikenne pysäytetty välittömästi.", 10000)
+        self.hud_label.setText("⛔ HÄTÄ-SEIS AKTIIVINEN — KAIKKI LIIKE PYSÄYTETTY")
+        self.hud_label.setStyleSheet("QLabel { background: #500000; color: #ffffff; font-family: Consolas, monospace; font-weight: bold; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 2px solid #ff1744; }")
+
+    def _load_demo_fixture(self, fixture_name: str) -> None:
+        """Loads built-in CAD workpiece fixture (V-groove plates, pipe joint, corner bracket)."""
+        ok = self.visualizer_3d.load_demo_workpiece(fixture_name)
+        if ok:
+            names = {
+                "WELD_PLATE": "V-saumalevyt (V-Groove Seam)",
+                "PIPE_JOINT": "Putkiliitos (Pipe T-Joint)",
+                "CORNER_BRACKET": "Kulmakiinnike (Corner Bracket)"
+            }
+            self.status_bar.showMessage(f"Esimerkkikappale ladattu: {names.get(fixture_name, fixture_name)} (Pöytäkoordinaatit X=260)", 5000)
+
+    def _clear_workpiece(self) -> None:
+        """Removes CAD workpiece from 3D scene."""
+        self.visualizer_3d.clear_workpiece()
+        self.status_bar.showMessage("Kappale poistettu 3D-työtilasta.", 3000)
 
     def _on_program_changed(self) -> None:
         """Refreshes 3D trajectory path when statements change."""

@@ -4,6 +4,7 @@ Displays the robot program as a structured tree (MainRoutine) with dedicated ico
 badges, statement toolbar (Add PTP, Add LIN, Gripper, Delay, Teach), and reordering.
 """
 from typing import Callable, List, Optional
+import copy
 from src.core.kinematics import RobotKinematics
 from src.core.program import (
     RobotProgram, Statement, MotionStatement, GripperStatement, DelayStatement
@@ -12,7 +13,7 @@ from src.ui.qt_compat import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTreeWidget, QTreeWidgetItem, QHeaderView, QGroupBox,
     QFileDialog, QMessageBox, Qt, QColor, QComboBox, QSpinBox,
-    QDialog, QGridLayout
+    QDialog, QGridLayout, QMenu, QAction, QShortcut, QKeySequence, QInputDialog
 )
 
 
@@ -141,9 +142,17 @@ class StatementTreePanel(QGroupBox):
         self.get_current_angles = get_current_angles_fn
         self.apply_angles = apply_angles_fn
         self.on_program_changed = on_program_changed_fn
+        self._undo_stack: List[list] = []
+        self._redo_stack: List[list] = []
 
         self._init_ui()
         self.refresh_tree()
+
+        # Keyboard shortcuts
+        QShortcut(QKeySequence("Ctrl+Z"), self, self._undo)
+        QShortcut(QKeySequence("Ctrl+Y"), self, self._redo)
+        QShortcut(QKeySequence("Delete"), self, self._delete_selected)
+        QShortcut(QKeySequence("Ctrl+D"), self, self._duplicate_selected)
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -243,9 +252,11 @@ class StatementTreePanel(QGroupBox):
             }
         """)
         self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
         layout.addWidget(self.tree, 1)
 
-        # 3. Action Toolbar (Teach, Up, Down, Delete, Save/Load)
+        # 3. Action Toolbar (Teach, Up, Down, Delete, Undo/Redo, Save/Load)
         act_layout = QHBoxLayout()
         act_layout.setSpacing(4)
 
@@ -257,9 +268,15 @@ class StatementTreePanel(QGroupBox):
             }
             QPushButton:hover { background: #0098ff; }
         """)
-        self.btn_teach.setToolTip("Päivitä valitun käskyn kohteeksi robotin nykyinen asento")
+        self.btn_teach.setToolTip("Päivitä valitun käskyn kohteeksi robotin nykyinen asento [Ctrl+T]")
         self.btn_teach.clicked.connect(self._teach_selected)
         act_layout.addWidget(self.btn_teach)
+
+        self.btn_dup = QPushButton("📋 Duplicate")
+        self.btn_dup.setToolTip("Monista valittu käsky [Ctrl+D]")
+        self.btn_dup.setStyleSheet(btn_style_act)
+        self.btn_dup.clicked.connect(self._duplicate_selected)
+        act_layout.addWidget(self.btn_dup)
 
         self.btn_up = QPushButton("▲ Up")
         self.btn_up.setToolTip("Siirrä käsky ylemmäs")
@@ -273,8 +290,20 @@ class StatementTreePanel(QGroupBox):
         self.btn_down.clicked.connect(self._move_down)
         act_layout.addWidget(self.btn_down)
 
+        self.btn_undo = QPushButton("↩ Undo")
+        self.btn_undo.setToolTip("Kumoa edellinen toiminto [Ctrl+Z]")
+        self.btn_undo.setStyleSheet(btn_style_act)
+        self.btn_undo.clicked.connect(self._undo)
+        act_layout.addWidget(self.btn_undo)
+
+        self.btn_redo = QPushButton("↪ Redo")
+        self.btn_redo.setToolTip("Tee uudelleen peruttu toiminto [Ctrl+Y]")
+        self.btn_redo.setStyleSheet(btn_style_act)
+        self.btn_redo.clicked.connect(self._redo)
+        act_layout.addWidget(self.btn_redo)
+
         self.btn_delete = QPushButton("Delete")
-        self.btn_delete.setToolTip("Poista valittu käsky")
+        self.btn_delete.setToolTip("Poista valittu käsky [Del]")
         self.btn_delete.setStyleSheet("background: #6e1c1c; color: #ffcccc; border: 1px solid #852a2a; border-radius: 3px; padding: 4px 8px;")
         self.btn_delete.clicked.connect(self._delete_selected)
         act_layout.addWidget(self.btn_delete)
@@ -378,17 +407,43 @@ class StatementTreePanel(QGroupBox):
         idx = items[0].data(0, Qt.UserRole)
         return idx if idx is not None else None
 
+    def _push_undo(self) -> None:
+        """Saves program state snapshot for Undo/Redo."""
+        self._undo_stack.append([copy.deepcopy(s) for s in self.program.statements])
+        if len(self._undo_stack) > 40:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+
+    def _undo(self) -> None:
+        """Reverts to previous program state [Ctrl+Z]."""
+        if not self._undo_stack:
+            return
+        self._redo_stack.append([copy.deepcopy(s) for s in self.program.statements])
+        self.program.statements = self._undo_stack.pop()
+        self.refresh_tree()
+
+    def _redo(self) -> None:
+        """Restores undone program state [Ctrl+Y]."""
+        if not self._redo_stack:
+            return
+        self._undo_stack.append([copy.deepcopy(s) for s in self.program.statements])
+        self.program.statements = self._redo_stack.pop()
+        self.refresh_tree()
+
     def _add_ptp(self) -> None:
+        self._push_undo()
         angles = self.get_current_angles()
         self.program.add_motion(angles, motion_type="PTP")
         self.refresh_tree()
 
     def _add_lin(self) -> None:
+        self._push_undo()
         angles = self.get_current_angles()
         self.program.add_motion(angles, motion_type="LIN")
         self.refresh_tree()
 
     def _add_gripper_action(self) -> None:
+        self._push_undo()
         angles = self.get_current_angles()
         cur_j6 = angles[5] if len(angles) >= 6 else 40
         action = "OPEN" if cur_j6 > 84 else "CLOSE"
@@ -397,12 +452,26 @@ class StatementTreePanel(QGroupBox):
         self.refresh_tree()
 
     def _add_delay(self) -> None:
+        self._push_undo()
         self.program.add_delay(duration_ms=500)
         self.refresh_tree()
+
+    def _duplicate_selected(self) -> None:
+        """Duplicates the currently selected statement [Ctrl+D]."""
+        idx = self._get_selected_index()
+        if idx is not None and 0 <= idx < len(self.program.statements):
+            self._push_undo()
+            new_stmt = copy.deepcopy(self.program.statements[idx])
+            if hasattr(new_stmt, "target_id"):
+                new_stmt.target_id += "_kopio"
+            self.program.statements.insert(idx + 1, new_stmt)
+            self.refresh_tree()
+            self._select_statement(idx + 1)
 
     def _teach_selected(self) -> None:
         idx = self._get_selected_index()
         if idx is not None:
+            self._push_undo()
             angles = self.get_current_angles()
             self.program.update_statement_pose(idx, angles)
             self.refresh_tree()
@@ -412,22 +481,27 @@ class StatementTreePanel(QGroupBox):
     def _move_up(self) -> None:
         idx = self._get_selected_index()
         if idx is not None and self.program.move_statement_up(idx):
+            self._push_undo()
             self.refresh_tree()
             self._select_statement(idx - 1)
 
     def _move_down(self) -> None:
         idx = self._get_selected_index()
         if idx is not None and self.program.move_statement_down(idx):
+            self._push_undo()
             self.refresh_tree()
             self._select_statement(idx + 1)
 
     def _delete_selected(self) -> None:
         idx = self._get_selected_index()
-        if idx is not None and self.program.remove_statement(idx):
-            self.refresh_tree()
+        if idx is not None:
+            self._push_undo()
+            if self.program.remove_statement(idx):
+                self.refresh_tree()
 
     def _clear_all(self) -> None:
         if self.program.statements:
+            self._push_undo()
             self.program.clear()
             self.refresh_tree()
 
@@ -437,17 +511,101 @@ class StatementTreePanel(QGroupBox):
             item = root.child(index)
             self.tree.setCurrentItem(item)
 
-    def _on_item_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
-        idx = item.data(0, Qt.UserRole)
-        if idx is not None and 0 <= idx < len(self.program.statements):
+    def _move_robot_to_index(self, idx: int) -> None:
+        """Drives robot arm to waypoint pose of specified statement."""
+        if 0 <= idx < len(self.program.statements):
             stmt = self.program.statements[idx]
             if isinstance(stmt, MotionStatement):
-                # Move 3D robot directly to this waypoint pose!
                 self.apply_angles(stmt.angles)
             elif isinstance(stmt, GripperStatement):
                 angles = self.get_current_angles()
                 angles[5] = stmt.target_angle
                 self.apply_angles(angles)
+
+    def _edit_statement(self, idx: int) -> None:
+        """Inline dialog for editing speed, duration, or comment."""
+        if 0 <= idx < len(self.program.statements):
+            stmt = self.program.statements[idx]
+            self._push_undo()
+            if isinstance(stmt, MotionStatement):
+                val, ok = QInputDialog.getInt(self, "Muokkaa nopeutta", f"Nopeus (%) käskylle {stmt.target_id}:", stmt.speed_percent, 1, 100)
+                if ok:
+                    stmt.speed_percent = val
+                    self.refresh_tree()
+            elif isinstance(stmt, DelayStatement):
+                val, ok = QInputDialog.getInt(self, "Muokkaa viivettä", "Pitoaika / viive (ms):", stmt.duration_ms, 50, 10000, 50)
+                if ok:
+                    stmt.duration_ms = val
+                    self.refresh_tree()
+            elif isinstance(stmt, GripperStatement):
+                val, ok = QInputDialog.getInt(self, "Muokkaa kourakulmaa", "Kouran asento (40°=auki, 128°=kiinni):", stmt.target_angle, 40, 128)
+                if ok:
+                    stmt.target_angle = val
+                    self.refresh_tree()
+
+    def _show_context_menu(self, pos) -> None:
+        """Right-click popup menu for statement operations."""
+        item = self.tree.itemAt(pos)
+        if not item:
+            return
+        idx = item.data(0, Qt.UserRole)
+        if idx is None or idx < 0 or idx >= len(self.program.statements):
+            return
+
+        stmt = self.program.statements[idx]
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background: #252526; color: #cccccc; border: 1px solid #3f3f46;
+                padding: 4px; font-size: 11px;
+            }
+            QMenu::item { padding: 5px 20px; }
+            QMenu::item:selected { background: #007acc; color: white; border-radius: 2px; }
+        """)
+
+        act_move = menu.addAction("▶ Aja robotti tähän pisteeseen (Move to Pose)")
+        act_teach = menu.addAction("🎯 Opeta nykyinen asento tähän (Teach Pose)")
+
+        act_toggle = None
+        if isinstance(stmt, MotionStatement):
+            next_t = "PTP" if stmt.statement_type == "LIN" else "LIN"
+            act_toggle = menu.addAction(f"🔄 Vaihda tyypiksi {next_t}")
+
+        act_edit = menu.addAction("✏ Muokkaa arvoja (Nopeus / Kesto / Kulma)...")
+        act_dup = menu.addAction("📋 Monista käsky (Duplicate) [Ctrl+D]")
+        menu.addSeparator()
+        act_up = menu.addAction("▲ Siirrä ylemmäs (Move Up)")
+        act_down = menu.addAction("▼ Siirrä alemmas (Move Down)")
+        menu.addSeparator()
+        act_del = menu.addAction("🗑 Poista käsky (Delete) [Del]")
+
+        action = menu.exec_(self.tree.viewport().mapToGlobal(pos))
+        if action == act_move:
+            self._move_robot_to_index(idx)
+        elif action == act_teach:
+            self._teach_selected()
+        elif action == act_toggle and act_toggle:
+            self._push_undo()
+            stmt.statement_type = "PTP" if stmt.statement_type == "LIN" else "LIN"
+            self.refresh_tree()
+        elif action == act_edit:
+            self._edit_statement(idx)
+        elif action == act_dup:
+            self._duplicate_selected()
+        elif action == act_up:
+            self._move_up()
+        elif action == act_down:
+            self._move_down()
+        elif action == act_del:
+            self._delete_selected()
+
+    def _on_item_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        idx = item.data(0, Qt.UserRole)
+        if idx is not None and 0 <= idx < len(self.program.statements):
+            if column == 0:
+                self._move_robot_to_index(idx)
+            else:
+                self._edit_statement(idx)
 
     def _open_weld_wizard(self) -> None:
         """Opens interactive wizard to create Approach -> Touchdown -> Weld -> Retract sequence."""

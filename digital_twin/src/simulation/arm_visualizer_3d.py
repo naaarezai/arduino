@@ -60,6 +60,7 @@ class ArmVisualizer3D(QWidget):
         self.tool_manager = ToolManager()
         self.active_tool: ToolProfile = self.tool_manager.active_tool
         self.tcp_actor: Optional[pv.Actor] = None
+        self.tcp_triad_actors: List[pv.Actor] = []
         self.workpiece_actor: Optional[pv.Actor] = None
         self.workpiece_bounds: Optional[tuple] = None
         self.weld_bead_actors: List[pv.Actor] = []
@@ -209,6 +210,17 @@ class ArmVisualizer3D(QWidget):
             ambient=0.9,
             render_points_as_spheres=True
         )
+
+        # 3D Tool Orientation Triad (Red=X, Green=Y, Blue=Z axes at TCP)
+        self.tcp_triad_actors = []
+        ax_len = 22.0
+        r_tube = 1.1
+        mx = pv.Line((0, 0, 0), (ax_len, 0, 0)).tube(radius=r_tube)
+        my = pv.Line((0, 0, 0), (0, ax_len, 0)).tube(radius=r_tube)
+        mz = pv.Line((0, 0, 0), (0, 0, ax_len)).tube(radius=r_tube)
+        self.tcp_triad_actors.append(self.plotter.add_mesh(mx, color="#ff1744", ambient=0.9))
+        self.tcp_triad_actors.append(self.plotter.add_mesh(my, color="#00e676", ambient=0.9))
+        self.tcp_triad_actors.append(self.plotter.add_mesh(mz, color="#2979ff", ambient=0.9))
 
         # Initialize active tool if not default gripper
         if self.active_tool.tool_type != "GRIPPER":
@@ -426,6 +438,11 @@ class ArmVisualizer3D(QWidget):
             t_tcp[1, 3] = pose.tcp_y
             t_tcp[2, 3] = pose.tcp_z
             self.tcp_actor.user_matrix = t_tcp
+
+        # Update 3D orientation triad at tool tip
+        mat_flange = pose.link_matrices[-1]
+        for act in self.tcp_triad_actors:
+            act.user_matrix = mat_flange
 
         # If Gizmo is active and not currently being dragged by the mouse, sync it to TCP
         if self.gizmo_widget and not getattr(self, "_is_dragging_gizmo", False):
@@ -645,6 +662,36 @@ class ArmVisualizer3D(QWidget):
                 )
                 self.trajectory_actors.append(tube_act)
 
+        # 4. Draw Waypoint Billboard Labels (P1, P2, P3...) in 3D scene
+        if tcp_points:
+            try:
+                pts_arr = np.array(tcp_points, dtype=np.float32)
+                pts_lbl = pts_arr.copy()
+                pts_lbl[:, 2] += 12.0
+                labels = []
+                for idx, it in enumerate(motion_items):
+                    lbl_id = getattr(it, "target_id", getattr(it, "comment", ""))
+                    if not lbl_id or lbl_id.startswith("P"):
+                        m_type = getattr(it, "statement_type", getattr(it, "motion_type", "PTP"))
+                        lbl_id = f"P{idx+1} ({m_type})"
+                    else:
+                        lbl_id = f"P{idx+1}: {lbl_id[:10]}"
+                    labels.append(lbl_id)
+                lbl_act = self.plotter.add_point_labels(
+                    pts_lbl,
+                    labels,
+                    point_size=0,
+                    font_size=10,
+                    text_color="#ffffff",
+                    shape="rounded_rect",
+                    shape_color="#212121",
+                    shape_opacity=0.85,
+                    always_visible=False
+                )
+                self.trajectory_actors.append(lbl_act)
+            except Exception:
+                pass
+
         self.plotter.render()
 
     def reset_camera(self) -> None:
@@ -698,6 +745,42 @@ class ArmVisualizer3D(QWidget):
             self.workpiece_actor = None
             self.workpiece_bounds = None
             self.plotter.render()
+
+    def load_demo_workpiece(self, fixture_name: str = "WELD_PLATE") -> bool:
+        """
+        Loads built-in CAD workpiece fixtures (V-seam plates, pipe T-joint, or corner bracket)
+        onto the workcell table for instant offline programming & seam teaching.
+        """
+        try:
+            self.clear_workpiece()
+            if fixture_name == "PIPE_JOINT":
+                p1 = pv.Cylinder(center=(260, 0, 30), direction=(0, 1, 0), radius=25, height=140, resolution=40)
+                p2 = pv.Cylinder(center=(260, 0, 55), direction=(0, 0, 1), radius=20, height=50, resolution=40)
+                mesh = p1 + p2
+            elif fixture_name == "CORNER_BRACKET":
+                b1 = pv.Cube(center=(260, -30, 10), x_length=80, y_length=60, z_length=20)
+                b2 = pv.Cube(center=(260, 5, 40), x_length=80, y_length=20, z_length=60)
+                mesh = b1 + b2
+            else:  # WELD_PLATE (Default)
+                p_left = pv.Cube(center=(260, -42, 10), x_length=120, y_length=80, z_length=20)
+                p_right = pv.Cube(center=(260, 42, 10), x_length=120, y_length=80, z_length=20)
+                mesh = p_left + p_right
+
+            mesh = mesh.compute_normals(auto_orient_normals=True)
+            self.workpiece_bounds = tuple(mesh.bounds)
+            self.workpiece_actor = self.plotter.add_mesh(
+                mesh,
+                color="#78909c",
+                specular=0.5,
+                specular_power=25,
+                smooth_shading=True,
+                show_edges=True,
+                edge_color="#37474f"
+            )
+            self.plotter.render()
+            return True
+        except Exception:
+            return False
 
     def add_weld_point(self, pt: List[float]) -> None:
         """Deposits a glowing molten weld seam bead element at the current TCP position."""

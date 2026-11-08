@@ -106,21 +106,28 @@ class ConnectionBar(QFrame):
         layout.addWidget(self.status_badge)
 
     def refresh_ports(self) -> None:
-        """Refreshes available COM ports in system."""
-        current = self.port_combo.currentText()
+        """Refreshes available COM ports with auto-detection for Arduino Uno R4 / USB devices."""
         self.port_combo.clear()
-        ports = SerialWorker.list_available_ports()
-        if ports:
-            self.port_combo.addItems(ports)
-            if current in ports:
-                self.port_combo.setCurrentText(current)
+        details = SerialWorker.list_port_details()
+        selected_index = 0
+        if details:
+            for idx, p in enumerate(details):
+                dev = p["device"]
+                desc = p["description"]
+                if p["is_arduino"]:
+                    label = f"⭐ {dev} ({desc})"
+                    selected_index = idx
+                else:
+                    label = f"🔌 {dev} ({desc})" if desc else dev
+                self.port_combo.addItem(label, dev)
+            self.port_combo.setCurrentIndex(selected_index)
         else:
-            self.port_combo.addItem("Ei portteja")
+            self.port_combo.addItem("Ei portteja", "")
 
     def _toggle_connection(self) -> None:
         if not self._is_connected:
-            port = self.port_combo.currentText()
-            if not port or port == "Ei portteja":
+            port = self.port_combo.currentData() or self.port_combo.currentText().split()[0]
+            if not port or port == "Ei":
                 return
             self.on_connect(port, DEFAULT_BAUDRATE)
         else:

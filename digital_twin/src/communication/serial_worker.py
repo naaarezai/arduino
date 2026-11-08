@@ -43,6 +43,29 @@ class SerialWorker(QThread):
         ports = list_ports.comports()
         return [port.device for port in ports]
 
+    @staticmethod
+    def list_port_details() -> List[dict]:
+        """Returns list of available port metadata with Arduino detection."""
+        res = []
+        for p in list_ports.comports():
+            desc = p.description or ""
+            mfg = p.manufacturer or ""
+            hwid = p.hwid or ""
+            combined = f"{desc} {mfg} {hwid}".lower()
+            is_ard = any(x in combined for x in ["arduino", "uno", "2341", "ch340", "cp210", "ftdi"])
+            res.append({
+                "device": p.device,
+                "description": desc,
+                "manufacturer": mfg,
+                "is_arduino": is_ard
+            })
+        return res
+
+    def emergency_stop(self) -> None:
+        """Immediately halts pending serial transmission and flushes queue."""
+        with QMutexLocker(self._mutex):
+            self._pending_angles = None
+
     def connect_serial(self, port: str, baudrate: int = DEFAULT_BAUDRATE) -> None:
         """Requests connection to a specific serial port."""
         with QMutexLocker(self._mutex):

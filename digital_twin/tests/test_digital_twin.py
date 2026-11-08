@@ -155,5 +155,24 @@ class TestToolManagerAndTCP(unittest.TestCase):
         self.assertNotEqual(p_torch.tcp_x, 0.0)
 
 
+class TestUXAndSafety(unittest.TestCase):
+    def test_serial_worker_emergency_stop(self):
+        from src.communication.serial_worker import SerialWorker
+        worker = SerialWorker()
+        worker.send_angles([90, 100, 110, 90, 90, 40])
+        self.assertIsNotNone(worker._pending_angles)
+        worker.emergency_stop()
+        self.assertIsNone(worker._pending_angles, "Emergency stop must immediately flush pending serial queue")
+
+    def test_port_metadata_structure(self):
+        from src.communication.serial_worker import SerialWorker
+        details = SerialWorker.list_port_details()
+        self.assertIsInstance(details, list)
+        for p in details:
+            self.assertIn("device", p)
+            self.assertIn("description", p)
+            self.assertIn("is_arduino", p)
+
+
 if __name__ == "__main__":
     unittest.main()

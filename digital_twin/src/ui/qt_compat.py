@@ -20,7 +20,8 @@ try:
         QMessageBox, QFileDialog, QFrame, QCheckBox, QTabWidget,
         QRadioButton, QButtonGroup, QDoubleSpinBox, QDialog,
         QTreeWidget, QTreeWidgetItem, QProgressBar, QToolBar, QAction,
-        QShortcut, QLineEdit, QTextEdit, QPlainTextEdit, QScrollArea
+        QShortcut, QLineEdit, QTextEdit, QPlainTextEdit, QScrollArea,
+        QMenu, QInputDialog
     )
     from PyQt5.QtGui import QColor, QFont, QIcon, QPalette, QKeySequence
 except Exception as e:
@@ -35,7 +36,8 @@ except Exception as e:
         QMessageBox, QFileDialog, QFrame, QCheckBox, QTabWidget,
         QRadioButton, QButtonGroup, QDoubleSpinBox, QDialog,
         QTreeWidget, QTreeWidgetItem, QProgressBar, QToolBar,
-        QShortcut, QLineEdit, QTextEdit, QPlainTextEdit, QScrollArea
+        QShortcut, QLineEdit, QTextEdit, QPlainTextEdit, QScrollArea,
+        QMenu, QInputDialog
     )
     from PyQt6.QtGui import QColor, QFont, QIcon, QPalette, QAction, QKeySequence
 
