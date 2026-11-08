@@ -160,7 +160,7 @@ class MainWindow(QMainWindow):
         """
         # 1. Update 3D kinematics
         pose = self.kinematics.forward_kinematics([float(a) for a in sim_angles])
-        self.visualizer_3d.update_pose(pose)
+        self.visualizer_3d.update_pose(pose, sim_angles)
 
         # 2. Update HUD display
         self.hud_label.setText(

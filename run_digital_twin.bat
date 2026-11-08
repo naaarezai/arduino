@@ -8,3 +8,4 @@ if %ERRORLEVEL% NEQ 0 (
     echo Sovelluksen ajamisessa tapahtui virhe.
     pause
 )
+

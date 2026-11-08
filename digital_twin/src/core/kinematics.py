@@ -92,37 +92,36 @@ class RobotKinematics:
         t_base = np.eye(4, dtype=np.float64)
 
         # Link 1 (Turntable base): Rotates around Z by (J1 - 90°)
-        # Home 90° points forward along +X
         r1 = rot_z_matrix(j1 - math.pi / 2.0)
         t_link1 = t_base @ r1
 
-        # Shoulder joint is at height L0
+        # Shoulder joint is at height L0 = 140mm
         t_shoulder_joint = t_link1 @ translation_matrix(0, 0, self.l0)
 
         # Link 2 (Upper arm): Rotates around Y axis by (J2 - 90°)
         r2 = rot_y_matrix(j2 - math.pi / 2.0)
         t_link2 = t_shoulder_joint @ r2
 
-        # Elbow joint is at distance L1 along link 2 (pointing up at 90°)
-        t_elbow_joint = t_link2 @ translation_matrix(0, 0, self.l1)
+        # Elbow joint is at distance 206mm (CAD hole-to-hole center) along link 2
+        t_elbow_joint = t_link2 @ translation_matrix(0, 0, 206.0)
 
         # Link 3 (Forearm): Rotates around Y axis by (J3 - 90°)
         r3 = rot_y_matrix(j3 - math.pi / 2.0)
         t_link3 = t_elbow_joint @ r3
 
-        # Wrist pitch joint is at distance L2 along link 3
-        t_wrist_joint = t_link3 @ translation_matrix(0, 0, self.l2)
+        # Wrist pitch joint is at distance 206mm along link 3
+        t_wrist_joint = t_link3 @ translation_matrix(0, 0, 206.0)
 
         # Link 4 (Wrist pitch): Rotates around Y axis by (J4 - 90°)
         r4 = rot_y_matrix(j4 - math.pi / 2.0)
         t_link4 = t_wrist_joint @ r4
 
-        # Link 5 (Wrist roll): Mounts on Link 4 and rotates around tool Z axis by (J5 - 90°)
+        # Link 5 (Wrist roll): Rotates around tool Z axis by (J5 - 90°)
         r5 = rot_z_matrix(j5 - math.pi / 2.0)
-        t_link5 = t_link4 @ translation_matrix(0, 0, 50.0) @ r5
+        t_link5 = t_link4 @ r5
 
-        # Gripper tool frame (TCP): extends to finger tips
-        t_tcp = t_link5 @ translation_matrix(0, 0, self.l3 - 50.0)
+        # Gripper Tool Center Point (TCP): extends to finger tips (~110mm from wrist)
+        t_tcp = t_link5 @ translation_matrix(0, 0, 110.0)
 
         # Extract TCP Cartesian coordinates
         tcp_x = float(t_tcp[0, 3])
