@@ -17,7 +17,8 @@ try:
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
         QLabel, QSlider, QSpinBox, QPushButton, QComboBox, QGroupBox, 
         QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QStatusBar,
-        QMessageBox, QFileDialog, QFrame, QCheckBox
+        QMessageBox, QFileDialog, QFrame, QCheckBox, QTabWidget,
+        QRadioButton, QButtonGroup, QDoubleSpinBox
     )
     from PyQt5.QtGui import QColor, QFont, QIcon, QPalette
 except Exception as e:
@@ -29,7 +30,8 @@ except Exception as e:
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
         QLabel, QSlider, QSpinBox, QPushButton, QComboBox, QGroupBox, 
         QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QStatusBar,
-        QMessageBox, QFileDialog, QFrame, QCheckBox
+        QMessageBox, QFileDialog, QFrame, QCheckBox, QTabWidget,
+        QRadioButton, QButtonGroup, QDoubleSpinBox
     )
     from PyQt6.QtGui import QColor, QFont, QIcon, QPalette
 

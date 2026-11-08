@@ -44,6 +44,7 @@ class ArmVisualizer3D(QWidget):
         self.gripper_left_actor: Optional[pv.Actor] = None
         self.gripper_right_actor: Optional[pv.Actor] = None
         self.tcp_actor: Optional[pv.Actor] = None
+        self.trajectory_actors: List[pv.Actor] = []
 
         # Add floor grid plane
         self._add_floor()
@@ -66,7 +67,15 @@ class ArmVisualizer3D(QWidget):
         """Loads STL models with exact kinematic alignment and splits gripper for animation."""
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-        # 1. Base
+        # Coordinate alignment matrix for arm links: X_orig -> Y_new, Y_orig -> Z_new, Z_orig -> X_new
+        mat_align = np.array([
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+        ], dtype=np.float64)
+
+        # 1. Base (fixed cylinder base on the floor)
         base_f = MODELS_DIR / "base.stl"
         if base_f.is_file():
             base_m = pv.read(str(base_f))
@@ -75,68 +84,61 @@ class ArmVisualizer3D(QWidget):
             base_m = self._make_procedural_base()
         self.actors.append(self.plotter.add_mesh(base_m, color="#37474f", smooth_shading=True))
 
-        # 2. Link 1 (Turntable)
+        # 2. Link 1 (Turntable top plate sitting at Z = 100 on top of base)
         l1_f = MODELS_DIR / "link1.stl"
         if l1_f.is_file():
             l1_m = pv.read(str(l1_f))
-            l1_m = l1_m.translate((-l1_m.center[0], -l1_m.center[1], 100.0), inplace=False)
+            l1_m = l1_m.translate((-l1_m.center[0], -l1_m.center[1], 100.0 - l1_m.bounds[4]), inplace=False)
         else:
             l1_m = self._make_procedural_link1()
         self.actors.append(self.plotter.add_mesh(l1_m, color="#455a64", smooth_shading=True))
 
-        # 3. Link 2 (Upper Arm - arm1)
+        # 3. Link 2 (Upper Arm - arm1.stl): Pivot hole at (0, 0, 0), hinge pin along Y, extends along +Z
         l2_f = MODELS_DIR / "link2.stl"
         if l2_f.is_file():
             l2_m = pv.read(str(l2_f))
-            # Align bottom hole center at (0, 0, 0), hinge pin along Y, length along +Z
-            l2_m = l2_m.translate((0, 18.55, 0), inplace=False)
-            l2_m = l2_m.rotate_z(90, point=(0, 0, 0), inplace=False)
-            l2_m = l2_m.rotate_y(90, point=(0, 0, 0), inplace=False)
+            l2_m = l2_m.translate((0, 15.0, 0), inplace=False)
+            l2_m = l2_m.transform(mat_align, inplace=False)
         else:
             l2_m = self._make_procedural_link2()
         self.actors.append(self.plotter.add_mesh(l2_m, color="#00bcd4", smooth_shading=True))
 
-        # 4. Link 3 (Forearm - arm1)
+        # 4. Link 3 (Forearm - arm1.stl): Pivot hole at (0, 0, 0), hinge pin along Y, extends along +Z
         l3_f = MODELS_DIR / "link3.stl"
         if not l3_f.is_file() and l2_f.is_file():
             l3_f = l2_f
         if l3_f.is_file():
             l3_m = pv.read(str(l3_f))
-            l3_m = l3_m.translate((0, 18.55, 0), inplace=False)
-            l3_m = l3_m.rotate_z(90, point=(0, 0, 0), inplace=False)
-            l3_m = l3_m.rotate_y(90, point=(0, 0, 0), inplace=False)
+            l3_m = l3_m.translate((0, 15.0, 0), inplace=False)
+            l3_m = l3_m.transform(mat_align, inplace=False)
         else:
             l3_m = self._make_procedural_link3()
         self.actors.append(self.plotter.add_mesh(l3_m, color="#eceff1", smooth_shading=True))
 
-        # 5. Link 4 (Ranne)
+        # 5. Link 4 (Ranne - ranne.stl): Wrist pitch bracket, ear holes at (0, 0, 0), pin along Y
         l4_f = MODELS_DIR / "link4.stl"
         if l4_f.is_file():
             l4_m = pv.read(str(l4_f))
-            l4_m = l4_m.rotate_z(90, point=(0, 0, 0), inplace=False)
-            l4_m = l4_m.rotate_y(-90, point=(0, 0, 0), inplace=False)
-            l4_m = l4_m.translate((0, 0, 25.0), inplace=False)
+            l4_m = l4_m.transform(mat_align, inplace=False)
         else:
             l4_m = self._make_procedural_link4()
         self.actors.append(self.plotter.add_mesh(l4_m, color="#ff9800", smooth_shading=True))
 
-        # 6. Link 5 (Tarttujan runkolevy)
+        # 6. Link 5 (Tarttujan runkolevy - link5.stl): Wrist roll plate, bottom at Z = 0
         l5_f = MODELS_DIR / "link5.stl"
         if l5_f.is_file():
             l5_m = pv.read(str(l5_f))
             l5_m = l5_m.translate((-l5_m.center[0], -l5_m.center[1], -l5_m.bounds[4]), inplace=False)
-            l5_m = l5_m.translate((0, 0, 28.0), inplace=False)
         else:
             l5_m = self._make_procedural_link5()
         self.actors.append(self.plotter.add_mesh(l5_m, color="#263238", smooth_shading=True))
 
-        # 7. Gripper (Split into animated components)
+        # 7. Gripper (Split into animated components: center mount, left finger, right finger)
         grip_f = MODELS_DIR / "gripper.stl"
         if grip_f.is_file():
             grip_m = pv.read(str(grip_f))
-            grip_m = grip_m.translate((-grip_m.center[0], -grip_m.bounds[3], -grip_m.center[2]), inplace=False)
+            grip_m = grip_m.translate((-16.2, -46.3, -30.0), inplace=False)
             grip_m = grip_m.rotate_x(-90, point=(0, 0, 0), inplace=False)
-            grip_m = grip_m.translate((0, 0, 35.0), inplace=False)
 
             bodies = grip_m.split_bodies()
             base_poly = pv.PolyData()
@@ -145,12 +147,12 @@ class ArmVisualizer3D(QWidget):
 
             for b in bodies:
                 cx = b.center[0]
-                if -5 < cx < 5:
-                    base_poly = base_poly + b
-                elif cx <= -5:
+                if cx < -5.0:
                     left_poly = left_poly + b
-                else:
+                elif cx > 5.0:
                     right_poly = right_poly + b
+                else:
+                    base_poly = base_poly + b
 
             self.gripper_base_actor = self.plotter.add_mesh(base_poly, color="#37474f", smooth_shading=True)
             self.gripper_left_actor = self.plotter.add_mesh(left_poly, color="#cfd8dc", smooth_shading=True)
@@ -160,11 +162,11 @@ class ArmVisualizer3D(QWidget):
             self.gripper_base_actor = self.plotter.add_mesh(grip_m, color="#cfd8dc", smooth_shading=True)
 
         # TCP Coordinate Indicator Sphere
-        tcp_sphere = pv.Sphere(radius=10, center=(0, 0, 0))
+        tcp_sphere = pv.Sphere(radius=8, center=(0, 0, 0))
         self.tcp_actor = self.plotter.add_mesh(
             tcp_sphere,
             color="#ff4081",
-            ambient=0.8,
+            ambient=0.9,
             render_points_as_spheres=True
         )
 
@@ -234,11 +236,11 @@ class ArmVisualizer3D(QWidget):
             if i < len(pose.link_matrices):
                 actor.user_matrix = pose.link_matrices[i]
 
-        # Update Gripper and animated fingers
-        mat_wrist = pose.link_matrices[4]  # Mounts onto wrist frame
+        # Update Gripper base and animated fingers (index 6 in link_matrices)
+        mat_gripper = pose.link_matrices[6] if len(pose.link_matrices) > 6 else pose.link_matrices[-1]
 
         if self.gripper_base_actor:
-            self.gripper_base_actor.user_matrix = mat_wrist
+            self.gripper_base_actor.user_matrix = mat_gripper
 
         # Calculate claw finger opening offset
         open_offset = 15.0
@@ -250,14 +252,14 @@ class ArmVisualizer3D(QWidget):
 
         if self.gripper_left_actor and self.gripper_right_actor:
             # Shift left and right fingers laterally along X
-            mat_l = mat_wrist @ np.array([
+            mat_l = mat_gripper @ np.array([
                 [1.0, 0.0, 0.0, -open_offset],
                 [0.0, 1.0, 0.0, 0.0],
                 [0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0]
             ], dtype=np.float64)
 
-            mat_r = mat_wrist @ np.array([
+            mat_r = mat_gripper @ np.array([
                 [1.0, 0.0, 0.0, open_offset],
                 [0.0, 1.0, 0.0, 0.0],
                 [0.0, 0.0, 1.0, 0.0],
@@ -274,6 +276,94 @@ class ArmVisualizer3D(QWidget):
             t_tcp[1, 3] = pose.tcp_y
             t_tcp[2, 3] = pose.tcp_z
             self.tcp_actor.user_matrix = t_tcp
+
+        self.plotter.render()
+
+    def update_trajectory_path(self, keyframes, kinematics) -> None:
+        """
+        Renders 3D trajectory path for Offline Programming (OLP / Visual Components style).
+        Visualizes PTP paths (cyan arcs) and LINEAR straight paths (glowing orange tubes / welding seams),
+        along with 3D waypoint marker spheres at each keyframe pose.
+        """
+        # 1. Clear previous trajectory actors
+        for act in self.trajectory_actors:
+            try:
+                self.plotter.remove_actor(act)
+            except Exception:
+                pass
+        self.trajectory_actors.clear()
+
+        if not keyframes:
+            self.plotter.render()
+            return
+
+        # 2. Extract TCP points for all keyframes
+        tcp_points = []
+        for i, kf in enumerate(keyframes):
+            pose = kinematics.forward_kinematics([float(a) for a in kf.angles])
+            pt = np.array([pose.tcp_x, pose.tcp_y, pose.tcp_z], dtype=np.float64)
+            tcp_points.append(pt)
+
+            # Add waypoint marker sphere
+            color = "#ff9800" if kf.motion_type == "LIN" else "#00e5ff"
+            sphere = pv.Sphere(radius=6.0, center=pt)
+            sphere_act = self.plotter.add_mesh(
+                sphere,
+                color=color,
+                ambient=0.9,
+                render_points_as_spheres=True,
+                show_edges=False
+            )
+            self.trajectory_actors.append(sphere_act)
+
+        # 3. Draw connecting trajectory segments between consecutive waypoints
+        for i in range(1, len(keyframes)):
+            kf_prev = keyframes[i - 1]
+            kf_curr = keyframes[i]
+            p_start = tcp_points[i - 1]
+            p_end = tcp_points[i]
+
+            dist = float(np.linalg.norm(p_end - p_start))
+            if dist < 0.5:
+                continue
+
+            if kf_curr.motion_type == "LIN":
+                # LINEAR straight line: precision Cartesian tube (orange welding seam)
+                line = pv.Line(p_start, p_end)
+                tube = line.tube(radius=2.5, n_sides=16)
+                tube_act = self.plotter.add_mesh(
+                    tube,
+                    color="#ff9800",
+                    ambient=0.8,
+                    opacity=0.9,
+                    smooth_shading=True
+                )
+                self.trajectory_actors.append(tube_act)
+            else:
+                # PTP arc: sample intermediate robot joint angles via S-curve
+                num_substeps = max(6, int(dist / 15.0))
+                sub_pts = []
+                for s in range(num_substeps + 1):
+                    prog = s / float(num_substeps)
+                    t_curv = (1.0 - np.cos(prog * np.pi)) / 2.0
+                    sub_angles = [
+                        float(a1 + (a2 - a1) * t_curv)
+                        for a1, a2 in zip(kf_prev.angles, kf_curr.angles)
+                    ]
+                    sub_pose = kinematics.forward_kinematics(sub_angles)
+                    sub_pts.append([sub_pose.tcp_x, sub_pose.tcp_y, sub_pose.tcp_z])
+
+                pts_arr = np.array(sub_pts, dtype=np.float64)
+                poly = pv.lines_from_points(pts_arr)
+                tube = poly.tube(radius=1.5, n_sides=12)
+                tube_act = self.plotter.add_mesh(
+                    tube,
+                    color="#00e5ff",
+                    ambient=0.7,
+                    opacity=0.75,
+                    smooth_shading=True
+                )
+                self.trajectory_actors.append(tube_act)
 
         self.plotter.render()
 

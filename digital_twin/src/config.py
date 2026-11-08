@@ -22,7 +22,7 @@ PACKET_FOOTER: str = ">\n"
 LINK_0_HEIGHT: float = 140.0  # Base height to Shoulder joint (J2)
 LINK_1_LENGTH: float = 200.0  # Shoulder to Elbow (J3)
 LINK_2_LENGTH: float = 200.0  # Elbow to Wrist Pitch (J4)
-LINK_3_LENGTH: float = 180.0  # Wrist Pitch to Gripper tip (J6)
+LINK_3_LENGTH: float = 166.0  # Wrist Pitch to Gripper tip (J6)
 
 # Joint Names and Limits
 JOINT_NAMES = [

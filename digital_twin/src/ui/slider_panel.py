@@ -175,10 +175,13 @@ class SliderPanel(QGroupBox):
         Returns angles mapped for the physical hardware (inversions applied).
         If inverted: physical_angle = 180 - angle.
         """
-        angles = self.get_angles()
+        return self.to_physical_angles(self.get_angles())
+
+    def to_physical_angles(self, angles: List[int]) -> List[int]:
+        """Maps any arbitrary list of angles with current joint inversion checkboxes."""
         phys = []
         for i, val in enumerate(angles):
-            if self.invert_checkboxes[i].isChecked():
+            if i < len(self.invert_checkboxes) and self.invert_checkboxes[i].isChecked():
                 phys.append(180 - val)
             else:
                 phys.append(val)
