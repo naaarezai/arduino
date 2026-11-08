@@ -155,6 +155,54 @@ class TestToolManagerAndTCP(unittest.TestCase):
         self.assertNotEqual(p_torch.tcp_x, 0.0)
 
 
+class TestWorkpieceAndWelding(unittest.TestCase):
+    def setUp(self):
+        self.kin = RobotKinematics()
+
+    def test_2click_seam_kinematics(self):
+        """Verifies mathematical correctness and reachability of 2-click welding sequences."""
+        xA, yA, zA = 240.0, -30.0, 20.0
+        xB, yB, zB = 240.0, 30.0, 20.0
+        seam_len = math.sqrt((xB - xA)**2 + (yB - yA)**2 + (zB - zA)**2)
+        self.assertAlmostEqual(seam_len, 60.0, places=1)
+
+        cur_angles = [90, 90, 90, 90, 90, 40]
+        app_h = 25.0
+
+        sol_app, pt_app = self.kin.solve_ik_clamped(xA, yA, zA + app_h, current_angles=cur_angles, preferred_pitch=-60.0)
+        sol_start, pt_start = self.kin.solve_ik_clamped(xA, yA, zA, current_angles=sol_app, preferred_pitch=-60.0)
+        sol_end, pt_end = self.kin.solve_ik_clamped(xB, yB, zB, current_angles=sol_start, preferred_pitch=-60.0)
+        sol_retract, pt_retract = self.kin.solve_ik_clamped(xB, yB, zB + app_h, current_angles=sol_end, preferred_pitch=-60.0)
+
+        self.assertIsNotNone(sol_app)
+        self.assertIsNotNone(sol_start)
+        self.assertIsNotNone(sol_end)
+        self.assertIsNotNone(sol_retract)
+
+        # Approach must be higher than seam touchdown
+        self.assertGreater(pt_app[2], pt_start[2])
+        self.assertGreater(pt_retract[2], pt_end[2])
+
+        # All joints must obey physical hardware limits
+        for sol in (sol_app, sol_start, sol_end, sol_retract):
+            self.assertTrue(all(0 <= sol[i] <= 180 for i in range(5)))
+            self.assertTrue(40 <= sol[5] <= 128)
+
+        # Build full 5-step program
+        prog = RobotProgram(kinematics=self.kin, name="2-Click Weld Seam")
+        prog.add_motion(sol_app, motion_type="PTP", speed_percent=100, comment="Approach")
+        prog.add_motion(sol_start, motion_type="LIN", speed_percent=50, comment="Touchdown / Arc On")
+        prog.add_motion(sol_end, motion_type="LIN", speed_percent=25, comment=f"Weld Seam ({seam_len:.1f} mm)")
+        prog.add_delay(duration_ms=500, comment="Crater Fill")
+        prog.add_motion(sol_retract, motion_type="LIN", speed_percent=80, comment="Retract")
+
+        self.assertEqual(len(prog.statements), 5)
+        traj = prog.generate_full_trajectory(cur_angles)
+        self.assertGreater(len(traj), 10)
+        weld_frames = [f for f in traj if f.is_welding]
+        self.assertGreater(len(weld_frames), 0)
+
+
 class TestUXAndSafety(unittest.TestCase):
     def test_serial_worker_emergency_stop(self):
         from src.communication.serial_worker import SerialWorker

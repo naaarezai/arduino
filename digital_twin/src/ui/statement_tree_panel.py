@@ -136,12 +136,14 @@ class StatementTreePanel(QGroupBox):
                  get_current_angles_fn: Callable[[], List[int]],
                  apply_angles_fn: Callable[[List[int]], None],
                  on_program_changed_fn: Optional[Callable[[], None]] = None,
+                 on_trigger_2click_seam_fn: Optional[Callable[[], None]] = None,
                  parent=None):
         super().__init__("Program Statement Tree (OLP)", parent)
         self.program = program
         self.get_current_angles = get_current_angles_fn
         self.apply_angles = apply_angles_fn
         self.on_program_changed = on_program_changed_fn
+        self.on_trigger_2click_seam = on_trigger_2click_seam_fn
         self._undo_stack: List[list] = []
         self._redo_stack: List[list] = []
 
@@ -223,6 +225,19 @@ class StatementTreePanel(QGroupBox):
         self.btn_weld_wiz.setToolTip("Generoi automaattinen 5-vaiheinen teollisuushitsausliike")
         self.btn_weld_wiz.clicked.connect(self._open_weld_wizard)
         tb_layout.addWidget(self.btn_weld_wiz)
+
+        self.btn_2click_seam = QPushButton("⚡ 2-Click Seam")
+        self.btn_2click_seam.setStyleSheet("""
+            QPushButton {
+                background: #3b0764; color: #e9d5ff; font-weight: 600; font-size: 11px;
+                border: 1px solid #9333ea; border-radius: 3px; padding: 5px 9px;
+            }
+            QPushButton:hover { background: #581c87; color: white; }
+        """)
+        self.btn_2click_seam.setToolTip("Kahden klikkauksen hitsaussauma: klikkaa 3D-kappaleelta sauman alku ja loppu")
+        if self.on_trigger_2click_seam:
+            self.btn_2click_seam.clicked.connect(self.on_trigger_2click_seam)
+        tb_layout.addWidget(self.btn_2click_seam)
 
         tb_layout.addStretch()
         layout.addLayout(tb_layout)

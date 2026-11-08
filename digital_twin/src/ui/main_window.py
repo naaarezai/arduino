@@ -8,7 +8,8 @@ Implements Visual Components -style architecture:
 5. 3D Trajectory rendering with tool orientation frames and collision check
 6. Live Arduino physical robot execution streaming
 """
-from typing import List, Optional
+import math
+from typing import List, Optional, Tuple
 from src.config import JOINT_LIMITS
 from src.core.calibration import CalibrationManager
 from src.core.kinematics import RobotKinematics
@@ -21,6 +22,7 @@ from src.ui.statement_tree_panel import StatementTreePanel
 from src.ui.compact_jog_panel import CompactJogPanel
 from src.ui.simulation_control_panel import SimulationControlPanel
 from src.ui.slider_panel import SliderPanel
+from src.ui.workpiece_dialog import WorkpieceTransformDialog
 from src.ui.qt_compat import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QSplitter, QStatusBar, QMessageBox, Qt, QFrame, QPushButton,
@@ -53,6 +55,7 @@ class MainWindow(QMainWindow):
         self.stream_timer.timeout.connect(self._on_robot_stream_tick)
         self._robot_stream_trajectory: List[List[int]] = []
         self._robot_stream_index: int = 0
+        self._seam_point_a: Optional[Tuple[float, float, float]] = None
 
         self._init_ui()
         self.kinematics.set_active_tool(self.visualizer_3d.active_tool)
@@ -207,6 +210,12 @@ class MainWindow(QMainWindow):
         btn_demo_fixture.setMenu(menu_demo)
         view_bar.addWidget(btn_demo_fixture)
 
+        btn_pos_part = QPushButton("📐 Asemoi...")
+        btn_pos_part.setStyleSheet(btn_style_cam)
+        btn_pos_part.setToolTip("Asemoi ja käännä kappale pöydällä (Workpiece Transform)")
+        btn_pos_part.clicked.connect(self._open_workpiece_dialog)
+        view_bar.addWidget(btn_pos_part)
+
         btn_tool = QPushButton("Tool & TCP...")
         btn_tool.setStyleSheet(btn_style_cam)
         btn_tool.clicked.connect(self._open_tool_dialog)
@@ -233,6 +242,40 @@ class MainWindow(QMainWindow):
         """)
         self.btn_view_gizmo.toggled.connect(self._on_gizmo_toggled_from_view)
         view_bar.addWidget(self.btn_view_gizmo)
+
+        # Snap TCP to surface toggle
+        self.btn_snap_surface = QPushButton("🎯 Snap TCP")
+        self.btn_snap_surface.setCheckable(True)
+        self.btn_snap_surface.setStyleSheet("""
+            QPushButton {
+                background: #252526; color: #00e5ff; font-weight: 600; font-size: 11px;
+                border: 1px solid #00e5ff; border-radius: 3px; padding: 3px 8px;
+            }
+            QPushButton:checked {
+                background: #00838f; color: #ffffff; border-color: #00e5ff;
+            }
+            QPushButton:hover:!checked { background: #2d2d30; }
+        """)
+        self.btn_snap_surface.setToolTip("Napsauta kappaleen pintaa 3D-ikkunassa: siirtää robotin polttimen kärjen suoraan kohteeseen")
+        self.btn_snap_surface.toggled.connect(self._toggle_surface_snapping)
+        view_bar.addWidget(self.btn_snap_surface)
+
+        # 2-Click Seam Generator toggle
+        self.btn_2click_seam = QPushButton("⚡ 2-Click Seam")
+        self.btn_2click_seam.setCheckable(True)
+        self.btn_2click_seam.setStyleSheet("""
+            QPushButton {
+                background: #252526; color: #d8b4fe; font-weight: 600; font-size: 11px;
+                border: 1px solid #9333ea; border-radius: 3px; padding: 3px 8px;
+            }
+            QPushButton:checked {
+                background: #7c3aed; color: #ffffff; border-color: #a855f7;
+            }
+            QPushButton:hover:!checked { background: #2d2d30; }
+        """)
+        self.btn_2click_seam.setToolTip("Kahden klikkauksen hitsaussauma: Napsauta sauman alku- ja loppupistettä kappaleen pinnalla")
+        self.btn_2click_seam.toggled.connect(self._toggle_2click_seam)
+        view_bar.addWidget(self.btn_2click_seam)
 
         view_bar.addStretch()
 
@@ -307,6 +350,7 @@ class MainWindow(QMainWindow):
             get_current_angles_fn=self._get_current_sim_angles,
             apply_angles_fn=self._apply_angles_to_arm,
             on_program_changed_fn=self._on_program_changed,
+            on_trigger_2click_seam_fn=self._trigger_2click_seam_from_panel,
             parent=self
         )
         p_layout.addWidget(self.statement_tree, 2)
@@ -512,6 +556,12 @@ class MainWindow(QMainWindow):
         self._set_gizmo_state(checked)
 
     def _set_gizmo_state(self, active: bool) -> None:
+        if active:
+            if hasattr(self, "btn_snap_surface") and self.btn_snap_surface.isChecked():
+                self.btn_snap_surface.setChecked(False)
+            if hasattr(self, "btn_2click_seam") and self.btn_2click_seam.isChecked():
+                self.btn_2click_seam.setChecked(False)
+
         self.visualizer_3d.set_gizmo_enabled(
             enabled=active,
             on_jog_callback=self._apply_angles_to_arm,
@@ -571,8 +621,193 @@ class MainWindow(QMainWindow):
 
     def _clear_workpiece(self) -> None:
         """Removes CAD workpiece from 3D scene."""
+        if hasattr(self, "btn_snap_surface") and self.btn_snap_surface.isChecked():
+            self.btn_snap_surface.setChecked(False)
+        if hasattr(self, "btn_2click_seam") and self.btn_2click_seam.isChecked():
+            self.btn_2click_seam.setChecked(False)
         self.visualizer_3d.clear_workpiece()
         self.status_bar.showMessage("Kappale poistettu 3D-työtilasta.", 3000)
+
+    def _open_workpiece_dialog(self) -> None:
+        """Opens dialog to position and rotate the CAD workpiece on the workcell table."""
+        if self.visualizer_3d.raw_workpiece_mesh is None:
+            res = QMessageBox.question(
+                self,
+                "Ei kappaletta työtilassa",
+                "Työtilassa ei ole vielä ladattuna työkappaletta.\n\n"
+                "Haluatko ladata esimerkkikappaleen 'V-saumalevyt'?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if res == QMessageBox.Yes:
+                self._load_demo_fixture("WELD_PLATE")
+            else:
+                return
+
+        dlg = WorkpieceTransformDialog(
+            initial_pos=self.visualizer_3d.workpiece_pos,
+            initial_rot_z=self.visualizer_3d.workpiece_rot_z,
+            on_transform_changed_callback=self.visualizer_3d.set_workpiece_transform,
+            on_clear_callback=self._clear_workpiece,
+            parent=self
+        )
+        dlg.exec_()
+
+    def _trigger_2click_seam_from_panel(self) -> None:
+        """Triggered from Statement Tree toolbar button."""
+        self.btn_2click_seam.setChecked(not self.btn_2click_seam.isChecked())
+
+    def _toggle_surface_snapping(self, checked: bool) -> None:
+        """Toggles 1-click surface snapping: clicking 3D surface moves robot TCP to touch it."""
+        if checked:
+            if self.visualizer_3d.raw_workpiece_mesh is None:
+                self.btn_snap_surface.setChecked(False)
+                res = QMessageBox.question(
+                    self,
+                    "Ei kappaletta työtilassa",
+                    "Pinnan napsautusta varten työtilassa on oltava työkappale.\n\n"
+                    "Ladataanko esimerkkikappale 'V-saumalevyt'?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                if res == QMessageBox.Yes:
+                    self._load_demo_fixture("WELD_PLATE")
+                    self.btn_snap_surface.setChecked(True)
+                return
+
+            if self.btn_view_gizmo.isChecked():
+                self.btn_view_gizmo.setChecked(False)
+            if self.btn_2click_seam.isChecked():
+                self.btn_2click_seam.setChecked(False)
+
+            self.visualizer_3d.enable_surface_snapping(self._on_surface_snapped)
+            self.status_bar.showMessage("🎯 Surface Snapping aktiivinen: Napsauta kappaleen pintaa viedäksesi polttimen kärki suoraan siihen.", 8000)
+            self.hud_label.setText("🎯 SNAP TO SURFACE: Napsauta kappaleen pintaa 3D-ikkunassa")
+            self.hud_label.setStyleSheet("QLabel { background: #00363a; color: #80deea; font-family: Consolas, monospace; font-weight: bold; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #00acc1; }")
+        else:
+            self.visualizer_3d.disable_surface_snapping()
+            self.status_bar.showMessage("Surface Snapping poistettu käytöstä.", 2000)
+            sim_angles = self._get_current_sim_angles()
+            self._on_angles_changed(sim_angles, sim_angles)
+
+    def _on_surface_snapped(self, x: float, y: float, z: float) -> None:
+        """Solves IK and moves the robot arm to touch the clicked 3D surface point."""
+        cur_angles = self._get_current_sim_angles()
+        sol, actual = self.kinematics.solve_ik_clamped(
+            x, y, z,
+            current_angles=cur_angles,
+            preferred_pitch=-60.0
+        )
+        if sol is not None:
+            self._apply_angles_to_arm(sol)
+            self.status_bar.showMessage(
+                f"🎯 Kärki asetettu pintaan: X={actual[0]:.1f}, Y={actual[1]:.1f}, Z={actual[2]:.1f} mm | Nivelet: {sol}",
+                5000
+            )
+        else:
+            self.status_bar.showMessage("⚠️ Piste on robotin ulottuvuusalueen ulkopuolella! Siirrä kappaletta lähemmäs.", 4000)
+
+    def _toggle_2click_seam(self, checked: bool) -> None:
+        """Activates 2-click seam picking mode (Point A -> Point B on workpiece)."""
+        if checked:
+            if self.visualizer_3d.raw_workpiece_mesh is None:
+                self.btn_2click_seam.setChecked(False)
+                res = QMessageBox.question(
+                    self,
+                    "Ei kappaletta työtilassa",
+                    "Hitsauksen saumageneraattori vaatii työkappaleen.\n\n"
+                    "Ladataanko esimerkkikappale 'V-saumalevyt'?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                if res == QMessageBox.Yes:
+                    self._load_demo_fixture("WELD_PLATE")
+                    self.btn_2click_seam.setChecked(True)
+                return
+
+            if self.btn_view_gizmo.isChecked():
+                self.btn_view_gizmo.setChecked(False)
+            if self.btn_snap_surface.isChecked():
+                self.btn_snap_surface.setChecked(False)
+
+            self._seam_point_a = None
+            self.visualizer_3d.enable_surface_snapping(self._on_seam_point_picked)
+            self.status_bar.showMessage("⚡ VAIHE 1/2: Napsauta kappaleen pinnasta SAUMAN ALKUPISTE (Piste A).", 10000)
+            self.hud_label.setText("⚡ 2-CLICK SEAM: Napsauta sauman ALKUPISTE (Piste A)")
+            self.hud_label.setStyleSheet("QLabel { background: #3b0764; color: #f3e8ff; font-family: Consolas, monospace; font-weight: bold; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #a855f7; }")
+        else:
+            self._seam_point_a = None
+            self.visualizer_3d.disable_surface_snapping()
+            self.status_bar.showMessage("2-Click Seam -tila peruutettu.", 2000)
+            sim_angles = self._get_current_sim_angles()
+            self._on_angles_changed(sim_angles, sim_angles)
+
+    def _on_seam_point_picked(self, x: float, y: float, z: float) -> None:
+        """Handles 2-point clicks on workpiece surface to generate full weld sequence."""
+        if self._seam_point_a is None:
+            self._seam_point_a = (float(x), float(y), float(z))
+            self.visualizer_3d.add_temp_marker(self._seam_point_a, color="#00e676", radius=5.0)
+            self.status_bar.showMessage(
+                f"⚡ VAIHE 2/2: Alku asetettu (X={x:.1f}, Y={y:.1f}, Z={z:.1f})! Napsauta nyt SAUMAN LOPPUPISTE (Piste B).",
+                10000
+            )
+            self.hud_label.setText(f"⚡ PISTE A: ({x:.0f}, {y:.0f}, {z:.0f}) -> Napsauta PISTE B")
+        else:
+            pt_a = self._seam_point_a
+            pt_b = (float(x), float(y), float(z))
+            self.visualizer_3d.add_temp_marker(pt_b, color="#ff9800", radius=5.0)
+
+            self.btn_2click_seam.setChecked(False)
+            self.visualizer_3d.disable_surface_snapping()
+            self._generate_2click_seam_routine(pt_a, pt_b)
+
+    def _generate_2click_seam_routine(self, pt_a: Tuple[float, float, float], pt_b: Tuple[float, float, float]) -> None:
+        """Compiles 5-step industrial welding sequence from two 3D surface points."""
+        xA, yA, zA = pt_a
+        xB, yB, zB = pt_b
+
+        seam_len = math.sqrt((xB - xA)**2 + (yB - yA)**2 + (zB - zA)**2)
+        if seam_len < 2.0:
+            QMessageBox.warning(self, "Virhe", "Pisteet A ja B ovat liian lähellä toisiaan (sauman pituus < 2 mm).")
+            sim_angles = self._get_current_sim_angles()
+            self._on_angles_changed(sim_angles, sim_angles)
+            return
+
+        cur_angles = self._get_current_sim_angles()
+        app_h = 25.0
+
+        sol_app, _ = self.kinematics.solve_ik_clamped(xA, yA, zA + app_h, current_angles=cur_angles, preferred_pitch=-60.0)
+        sol_start, _ = self.kinematics.solve_ik_clamped(xA, yA, zA, current_angles=sol_app or cur_angles, preferred_pitch=-60.0)
+        sol_end, _ = self.kinematics.solve_ik_clamped(xB, yB, zB, current_angles=sol_start or cur_angles, preferred_pitch=-60.0)
+        sol_retract, _ = self.kinematics.solve_ik_clamped(xB, yB, zB + app_h, current_angles=sol_end or cur_angles, preferred_pitch=-60.0)
+
+        if not all([sol_app, sol_start, sol_end, sol_retract]):
+            QMessageBox.warning(
+                self,
+                "Ulottuvuusraja",
+                f"Laskettu hitsaussauma ({seam_len:.1f} mm) ylittää osittain robotin ulottuvuusalueen!\n\n"
+                "Käytä '📐 Asemoi...' -toimintoa siirtääksesi työkappaleen paremmalle etäisyydelle robotista."
+            )
+            sim_angles = self._get_current_sim_angles()
+            self._on_angles_changed(sim_angles, sim_angles)
+            return
+
+        self.statement_tree._push_undo()
+
+        self.program.add_motion(sol_app, motion_type="PTP", speed_percent=100, comment=f"Lähestyminen saumaan (+{int(app_h)}mm)")
+        self.program.add_motion(sol_start, motion_type="LIN", speed_percent=50, comment="Kosketus / Valokaari syttyy (ARC ON)")
+        self.program.add_motion(sol_end, motion_type="LIN", speed_percent=25, comment=f"Hitsaussauma LIN ({seam_len:.1f} mm)")
+        self.program.add_delay(duration_ms=500, comment="Kraatterin täyttö / Valokaari sammuu (ARC OFF)")
+        self.program.add_motion(sol_retract, motion_type="LIN", speed_percent=80, comment=f"Nosto sauman päältä (+{int(app_h)}mm)")
+
+        self.statement_tree.refresh_tree()
+        self._on_program_changed()
+        self._apply_angles_to_arm(sol_app)
+
+        self.status_bar.showMessage(
+            f"✅ 5-vaiheinen hitsausohjelma generoitu onnistuneesti! Sauman pituus: {seam_len:.1f} mm.",
+            6000
+        )
 
     def _on_program_changed(self) -> None:
         """Refreshes 3D trajectory path when statements change."""

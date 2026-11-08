@@ -4,7 +4,7 @@ Integrates PyVistaQt QtInteractor into PyQt, rendering calibrated CAD STL models
 with animated opening/closing gripper fingers and hardware-accelerated 60 FPS posing.
 """
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import math
 import time
 import numpy as np
@@ -63,6 +63,11 @@ class ArmVisualizer3D(QWidget):
         self.tcp_triad_actors: List[pv.Actor] = []
         self.workpiece_actor: Optional[pv.Actor] = None
         self.workpiece_bounds: Optional[tuple] = None
+        self.raw_workpiece_mesh: Optional[pv.PolyData] = None
+        self.workpiece_pos: List[float] = [260.0, 0.0, 0.0]
+        self.workpiece_rot_z: float = 0.0
+        self.is_snapping_active: bool = False
+        self.temp_marker_actors: List[pv.Actor] = []
         self.weld_bead_actors: List[pv.Actor] = []
         self.weld_points: List[List[float]] = []
         self.envelope_actor: Optional[pv.Actor] = None
@@ -717,20 +722,11 @@ class ArmVisualizer3D(QWidget):
         try:
             self.clear_workpiece()
             mesh = pv.read(file_path)
-            # Position workpiece on workcell table at reachable position (X=260, Y=0, Z=0)
-            mesh = mesh.translate((-mesh.center[0] + 260.0, -mesh.center[1], -mesh.bounds[4]), inplace=False)
+            # Normalize so bottom of mesh is at Z=0, and center is at (0, 0)
+            mesh = mesh.translate((-mesh.center[0], -mesh.center[1], -mesh.bounds[4]), inplace=False)
             mesh = mesh.compute_normals(auto_orient_normals=True)
-            self.workpiece_bounds = tuple(mesh.bounds)
-            self.workpiece_actor = self.plotter.add_mesh(
-                mesh,
-                color="#64748b",
-                specular=0.5,
-                specular_power=20,
-                smooth_shading=True,
-                show_edges=True,
-                edge_color="#475569"
-            )
-            self.plotter.render()
+            self.raw_workpiece_mesh = mesh
+            self.set_workpiece_transform(260.0, 0.0, 0.0, 0.0)
             return True
         except Exception:
             return False
@@ -744,7 +740,39 @@ class ArmVisualizer3D(QWidget):
                 pass
             self.workpiece_actor = None
             self.workpiece_bounds = None
+            self.raw_workpiece_mesh = None
+            self.clear_temp_markers()
             self.plotter.render()
+
+    def set_workpiece_transform(self, x: float = 260.0, y: float = 0.0, z: float = 0.0, rot_z_deg: float = 0.0) -> None:
+        """Positions and rotates the active CAD workpiece anywhere on the robot workcell table."""
+        if self.raw_workpiece_mesh is None:
+            return
+        self.workpiece_pos = [float(x), float(y), float(z)]
+        self.workpiece_rot_z = float(rot_z_deg)
+
+        mesh = self.raw_workpiece_mesh.copy()
+        if rot_z_deg != 0.0:
+            mesh = mesh.rotate_z(rot_z_deg, inplace=False)
+        mesh = mesh.translate((x, y, z), inplace=False)
+        mesh = mesh.compute_normals(auto_orient_normals=True)
+
+        self.workpiece_bounds = tuple(mesh.bounds)
+        if self.workpiece_actor:
+            try:
+                self.plotter.remove_actor(self.workpiece_actor)
+            except Exception:
+                pass
+        self.workpiece_actor = self.plotter.add_mesh(
+            mesh,
+            color="#78909c",
+            specular=0.5,
+            specular_power=25,
+            smooth_shading=True,
+            show_edges=True,
+            edge_color="#37474f"
+        )
+        self.plotter.render()
 
     def load_demo_workpiece(self, fixture_name: str = "WELD_PLATE") -> bool:
         """
@@ -754,33 +782,78 @@ class ArmVisualizer3D(QWidget):
         try:
             self.clear_workpiece()
             if fixture_name == "PIPE_JOINT":
-                p1 = pv.Cylinder(center=(260, 0, 30), direction=(0, 1, 0), radius=25, height=140, resolution=40)
-                p2 = pv.Cylinder(center=(260, 0, 55), direction=(0, 0, 1), radius=20, height=50, resolution=40)
+                p1 = pv.Cylinder(center=(0, 0, 30), direction=(0, 1, 0), radius=25, height=140, resolution=40)
+                p2 = pv.Cylinder(center=(0, 0, 55), direction=(0, 0, 1), radius=20, height=50, resolution=40)
                 mesh = p1 + p2
             elif fixture_name == "CORNER_BRACKET":
-                b1 = pv.Cube(center=(260, -30, 10), x_length=80, y_length=60, z_length=20)
-                b2 = pv.Cube(center=(260, 5, 40), x_length=80, y_length=20, z_length=60)
+                b1 = pv.Cube(center=(0, -30, 10), x_length=80, y_length=60, z_length=20)
+                b2 = pv.Cube(center=(0, 5, 40), x_length=80, y_length=20, z_length=60)
                 mesh = b1 + b2
             else:  # WELD_PLATE (Default)
-                p_left = pv.Cube(center=(260, -42, 10), x_length=120, y_length=80, z_length=20)
-                p_right = pv.Cube(center=(260, 42, 10), x_length=120, y_length=80, z_length=20)
+                p_left = pv.Cube(center=(0, -42, 10), x_length=120, y_length=80, z_length=20)
+                p_right = pv.Cube(center=(0, 42, 10), x_length=120, y_length=80, z_length=20)
                 mesh = p_left + p_right
 
+            mesh = mesh.translate((-mesh.center[0], -mesh.center[1], -mesh.bounds[4]), inplace=False)
             mesh = mesh.compute_normals(auto_orient_normals=True)
-            self.workpiece_bounds = tuple(mesh.bounds)
-            self.workpiece_actor = self.plotter.add_mesh(
-                mesh,
-                color="#78909c",
-                specular=0.5,
-                specular_power=25,
-                smooth_shading=True,
-                show_edges=True,
-                edge_color="#37474f"
-            )
-            self.plotter.render()
+            self.raw_workpiece_mesh = mesh
+            self.set_workpiece_transform(260.0, 0.0, 0.0, 0.0)
             return True
         except Exception:
             return False
+
+    def enable_surface_snapping(self, on_snap_callback: any) -> None:
+        """Enables 3D click-to-snap: clicking workpiece passes exact surface XYZ to callback."""
+        self.is_snapping_active = True
+        def _on_pick(picked_point):
+            if picked_point is not None:
+                on_snap_callback(float(picked_point[0]), float(picked_point[1]), float(picked_point[2]))
+
+        self.plotter.enable_surface_point_picking(
+            callback=_on_pick,
+            left_clicking=True,
+            show_point=True,
+            color="#00e5ff",
+            point_size=12,
+            show_message=False,
+            picker="cell"
+        )
+
+    def disable_surface_snapping(self) -> None:
+        """Disables surface point picking and returns to orbit camera control."""
+        self.is_snapping_active = False
+        try:
+            self.plotter.disable_picking()
+        except Exception:
+            pass
+        self.clear_temp_markers()
+        try:
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def add_temp_marker(self, pt: Tuple[float, float, float], color: str = "#00e676", radius: float = 5.0) -> None:
+        """Adds a temporary visual marker sphere at the specified 3D coordinate."""
+        try:
+            sphere = pv.Sphere(radius=radius, center=pt)
+            actor = self.plotter.add_mesh(sphere, color=color, smooth_shading=True)
+            self.temp_marker_actors.append(actor)
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def clear_temp_markers(self) -> None:
+        """Clears all temporary 3D markers."""
+        for act in self.temp_marker_actors:
+            try:
+                self.plotter.remove_actor(act)
+            except Exception:
+                pass
+        self.temp_marker_actors.clear()
+        try:
+            self.plotter.render()
+        except Exception:
+            pass
 
     def add_weld_point(self, pt: List[float]) -> None:
         """Deposits a glowing molten weld seam bead element at the current TCP position."""
