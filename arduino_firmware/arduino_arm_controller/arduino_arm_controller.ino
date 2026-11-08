@@ -138,7 +138,46 @@ void setup() {
   Serial.println("BLE kaynnistetty! Mainostetaan nimella: Arduino-Arm");
 }
 
+void checkSerialInput() {
+  static char serialBuf[64];
+  static int bufIndex = 0;
+  static bool receiving = false;
+
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '<') {
+      receiving = true;
+      bufIndex = 0;
+    } else if (c == '>') {
+      if (receiving) {
+        serialBuf[bufIndex] = '\0';
+        receiving = false;
+        
+        int a0, a1, a2, a3, a4, a5;
+        if (sscanf(serialBuf, "%d,%d,%d,%d,%d,%d", &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
+          targetAngles[0] = constrain(a0, minAngles[0], maxAngles[0]);
+          targetAngles[1] = constrain(a1, minAngles[1], maxAngles[1]);
+          targetAngles[2] = constrain(a2, minAngles[2], maxAngles[2]);
+          targetAngles[3] = constrain(a3, minAngles[3], maxAngles[3]);
+          targetAngles[4] = constrain(a4, minAngles[4], maxAngles[4]);
+          targetAngles[5] = constrain(a5, minAngles[5], maxAngles[5]);
+          Serial.println("<OK>");
+        }
+      }
+    } else if (receiving) {
+      if (bufIndex < 63) {
+        serialBuf[bufIndex++] = c;
+      } else {
+        receiving = false; // overflow protection
+      }
+    }
+  }
+}
+
 void loop() {
+  // Tarkistetaan saapuuko komentoja USB-sarjaportista (PC Digital Twin)
+  checkSerialInput();
+
   BLEDevice central = BLE.central();
 
   if (central) {
@@ -147,6 +186,8 @@ void loop() {
     matrix.loadFrame(iconReady);
 
     while (central.connected()) {
+      checkSerialInput(); // Kuunnellaan USB-sarjaliikennettä myös BLE-yhteyden aikana
+
       if (armCharacteristic.written()) {
         int len = armCharacteristic.valueLength();
         const uint8_t* val = armCharacteristic.value();
