@@ -18,6 +18,7 @@ from src.core.kinematics import RobotKinematics
 from src.core.calibration import CalibrationManager
 from src.core.post_processor import RobotPostProcessor
 from src.core.program import RobotProgram, MotionStatement, GripperStatement, DelayStatement
+from src.core.tool_data import ToolProfile, ToolManager, TOOL_PRESETS
 
 
 class TestKinematics(unittest.TestCase):
@@ -93,6 +94,44 @@ class TestPostProcessor(unittest.TestCase):
         self.assertIn("const int servoPins[6] = {3, 5, 6, 9, 10, 11};", sketch)
         self.assertIn("Approach", sketch)
         self.assertIn("Weld Touchdown", sketch)
+
+
+class TestToolManagerAndTCP(unittest.TestCase):
+    def test_tool_presets_and_persistence(self):
+        tm = ToolManager()
+        # Set welding torch preset
+        torch = tm.set_preset("WELDING_TORCH")
+        self.assertEqual(torch.tool_type, "WELDING_TORCH")
+        self.assertEqual(torch.tcp_z, 135.0)
+        self.assertEqual(torch.tcp_x, 35.0)
+        
+        # Load from disk
+        loaded = tm.load_tool()
+        self.assertEqual(loaded.tool_type, "WELDING_TORCH")
+        self.assertEqual(loaded.tcp_z, 135.0)
+
+        # Reset back to gripper
+        tm.set_preset("GRIPPER")
+
+    def test_kinematics_with_active_tool(self):
+        kin = RobotKinematics()
+        
+        # 1. With standard gripper (tcp_z = 99.3)
+        gripper = TOOL_PRESETS["GRIPPER"]
+        kin.set_active_tool(gripper)
+        p_grip = kin.forward_kinematics([90, 90, 90, 90, 90, 40])
+        self.assertAlmostEqual(p_grip.tcp_z, 688.3, places=1)
+        self.assertAlmostEqual(p_grip.tcp_x, 0.0, places=1)
+
+        # 2. With welding torch (tcp_z = 135.0, tcp_x = 35.0, pitch = 45°)
+        torch = TOOL_PRESETS["WELDING_TORCH"]
+        kin.set_active_tool(torch)
+        p_torch = kin.forward_kinematics([90, 90, 90, 90, 90, 40])
+        # Tool flange is at Z = 589.0 in upright home pose.
+        # Torch has tcp_x = 35.0, tcp_z = 135.0 with 45 deg pitch
+        # Flange normal is along +Z, so tool offset is directly added
+        self.assertGreater(p_torch.tcp_z, p_grip.tcp_z)
+        self.assertNotEqual(p_torch.tcp_x, 0.0)
 
 
 if __name__ == "__main__":

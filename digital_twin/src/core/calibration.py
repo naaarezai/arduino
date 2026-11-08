@@ -110,3 +110,4 @@ class CalibrationManager:
             val = max(min_v, min(max_v, int(round(val))))
             sim.append(val)
         return sim
+

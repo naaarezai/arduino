@@ -15,6 +15,7 @@ from src.config import (
     MODELS_DIR, STL_FILES
 )
 from src.core.kinematics import PoseData, translation_matrix
+from src.core.tool_data import ToolProfile, ToolManager
 from src.ui.qt_compat import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 
 
@@ -50,6 +51,9 @@ class ArmVisualizer3D(QWidget):
         self.gripper_base_actor: Optional[pv.Actor] = None
         self.gripper_left_actor: Optional[pv.Actor] = None
         self.gripper_right_actor: Optional[pv.Actor] = None
+        self.active_tool_actor: Optional[pv.Actor] = None
+        self.tool_manager = ToolManager()
+        self.active_tool: ToolProfile = self.tool_manager.active_tool
         self.tcp_actor: Optional[pv.Actor] = None
         self.workpiece_actor: Optional[pv.Actor] = None
         self.workpiece_bounds: Optional[tuple] = None
@@ -194,10 +198,14 @@ class ArmVisualizer3D(QWidget):
         tcp_sphere = pv.Sphere(radius=6, center=(0, 0, 0))
         self.tcp_actor = self.plotter.add_mesh(
             tcp_sphere,
-            color="#00e5ff",
+            color=self.active_tool.color,
             ambient=0.9,
             render_points_as_spheres=True
         )
+
+        # Initialize active tool if not default gripper
+        if self.active_tool.tool_type != "GRIPPER":
+            self.set_active_tool(self.active_tool)
 
     # ---------------- Procedural Fallbacks ----------------
     def _make_procedural_base(self) -> pv.PolyData:
@@ -239,6 +247,84 @@ class ArmVisualizer3D(QWidget):
         finger_r = pv.Cube(center=(18, 0, 55), x_length=8, y_length=16, z_length=50)
         return palm + finger_l + finger_r
 
+    def _make_welding_torch(self) -> pv.PolyData:
+        c1 = pv.Cylinder(center=(0, 0, 10), direction=(0, 0, 1), radius=18, height=20, resolution=30)
+        pts = np.array([
+            [0, 0, 20],
+            [0, 0, 50],
+            [8, 0, 80],
+            [25, 0, 110],
+            [35, 0, 125]
+        ], dtype=np.float64)
+        spline = pv.Spline(pts, 30)
+        neck = spline.tube(radius=6.0, n_sides=20)
+        nozzle = pv.Cylinder(center=(32, 0, 120), direction=(10, 0, 15), radius=8.0, height=22, resolution=24)
+        wire = pv.Line((32, 0, 120), (35, 0, 135)).tube(radius=0.9, n_sides=12)
+        return c1 + neck + nozzle + wire
+
+    def _make_dispenser(self) -> pv.PolyData:
+        collar = pv.Cylinder(center=(0, 0, 12), direction=(0, 0, 1), radius=16, height=24, resolution=30)
+        barrel = pv.Cylinder(center=(0, 0, 45), direction=(0, 0, 1), radius=10, height=45, resolution=30)
+        taper = pv.Cone(center=(0, 0, 72), direction=(0, 0, 1), radius=10, height=12, resolution=30)
+        needle = pv.Cylinder(center=(0, 0, 95), direction=(0, 0, 1), radius=1.2, height=40, resolution=20)
+        return collar + barrel + taper + needle
+
+    def _make_vacuum(self) -> pv.PolyData:
+        mount = pv.Cylinder(center=(0, 0, 15), direction=(0, 0, 1), radius=14, height=30, resolution=30)
+        bellows1 = pv.Cylinder(center=(0, 0, 36), direction=(0, 0, 1), radius=18, height=12, resolution=30)
+        bellows2 = pv.Cylinder(center=(0, 0, 48), direction=(0, 0, 1), radius=22, height=12, resolution=30)
+        lip = pv.Disc(center=(0, 0, 65), inner=0, outer=24, normal=(0, 0, 1), r_res=30)
+        return mount + bellows1 + bellows2 + lip
+
+    def set_active_tool(self, tool: ToolProfile) -> None:
+        """
+        Dynamically snaps the specified tool to the robot tool flange,
+        updating the 3D viewport representation and TCP marker.
+        """
+        self.active_tool = tool
+
+        if self.active_tool_actor:
+            try:
+                self.plotter.remove_actor(self.active_tool_actor)
+            except Exception:
+                pass
+            self.active_tool_actor = None
+
+        is_gripper = (tool.tool_type == "GRIPPER")
+
+        if self.gripper_base_actor:
+            self.gripper_base_actor.SetVisibility(is_gripper)
+        if self.gripper_left_actor:
+            self.gripper_left_actor.SetVisibility(is_gripper)
+        if self.gripper_right_actor:
+            self.gripper_right_actor.SetVisibility(is_gripper)
+
+        if not is_gripper:
+            if tool.tool_type == "WELDING_TORCH":
+                mesh = self._make_welding_torch()
+            elif tool.tool_type == "DISPENSER":
+                mesh = self._make_dispenser()
+            elif tool.tool_type == "VACUUM":
+                mesh = self._make_vacuum()
+            elif tool.tool_type == "CUSTOM_STL" and tool.mesh_path and Path(tool.mesh_path).is_file():
+                mesh = pv.read(tool.mesh_path)
+                mesh = mesh.translate((-mesh.center[0], -mesh.center[1], -mesh.bounds[4]), inplace=False)
+            else:
+                mesh = self._make_procedural_gripper()
+
+            mesh = mesh.compute_normals(auto_orient_normals=True)
+            self.active_tool_actor = self.plotter.add_mesh(
+                mesh, color=tool.color, specular=0.45, specular_power=25, smooth_shading=True
+            )
+
+        if self.tcp_actor:
+            try:
+                self.tcp_actor.GetProperty().SetColor(pv.Color(tool.color).float_rgb)
+            except Exception:
+                pass
+
+        self.plotter.render()
+
     @property
     def l0(self) -> float:
         return LINK_0_HEIGHT
@@ -265,39 +351,43 @@ class ArmVisualizer3D(QWidget):
             if i < len(pose.link_matrices):
                 actor.user_matrix = pose.link_matrices[i]
 
-        # Update Gripper base and animated fingers (index 6 in link_matrices)
+        # Update Gripper base or Active Tool actor (index 6 in link_matrices)
         mat_gripper = pose.link_matrices[6] if len(pose.link_matrices) > 6 else pose.link_matrices[-1]
 
-        if self.gripper_base_actor:
-            self.gripper_base_actor.user_matrix = mat_gripper
+        if self.active_tool.tool_type == "GRIPPER":
+            if self.gripper_base_actor:
+                self.gripper_base_actor.user_matrix = mat_gripper
 
-        # Calculate claw finger opening offset
-        open_offset = 14.0
-        if joint_angles and len(joint_angles) >= 6:
-            j6 = float(joint_angles[5])
-            # 40 deg = fully open (~44mm tip gap), 128 deg = tightly closed (~0mm tip gap)
-            progress = max(0.0, min(1.0, (j6 - 40.0) / (128.0 - 40.0)))
-            # Model default tip gap is 11.68mm. Offset -5.8mm closes it; +16.0mm opens it wide.
-            open_offset = (1.0 - progress) * 21.8 - 5.8
+            # Calculate claw finger opening offset
+            open_offset = 14.0
+            if joint_angles and len(joint_angles) >= 6:
+                j6 = float(joint_angles[5])
+                # 40 deg = fully open (~44mm tip gap), 128 deg = tightly closed (~0mm tip gap)
+                progress = max(0.0, min(1.0, (j6 - 40.0) / (128.0 - 40.0)))
+                # Model default tip gap is 11.68mm. Offset -5.8mm closes it; +16.0mm opens it wide.
+                open_offset = (1.0 - progress) * 21.8 - 5.8
 
-        if self.gripper_left_actor and self.gripper_right_actor:
-            # Shift left and right fingers laterally along X
-            mat_l = mat_gripper @ np.array([
-                [1.0, 0.0, 0.0, -open_offset],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0]
-            ], dtype=np.float64)
+            if self.gripper_left_actor and self.gripper_right_actor:
+                # Shift left and right fingers laterally along X
+                mat_l = mat_gripper @ np.array([
+                    [1.0, 0.0, 0.0, -open_offset],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
+                ], dtype=np.float64)
 
-            mat_r = mat_gripper @ np.array([
-                [1.0, 0.0, 0.0, open_offset],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0]
-            ], dtype=np.float64)
+                mat_r = mat_gripper @ np.array([
+                    [1.0, 0.0, 0.0, open_offset],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
+                ], dtype=np.float64)
 
-            self.gripper_left_actor.user_matrix = mat_l
-            self.gripper_right_actor.user_matrix = mat_r
+                self.gripper_left_actor.user_matrix = mat_l
+                self.gripper_right_actor.user_matrix = mat_r
+        else:
+            if self.active_tool_actor:
+                self.active_tool_actor.user_matrix = mat_gripper
 
         # Update TCP point
         self._current_tcp = [pose.tcp_x, pose.tcp_y, pose.tcp_z]

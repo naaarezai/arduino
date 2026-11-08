@@ -1,0 +1,12 @@
+{
+  "name": "2-Leukakoura (Standard Gripper)",
+  "tool_type": "GRIPPER",
+  "tcp_x": 0.0,
+  "tcp_y": 0.0,
+  "tcp_z": 99.3,
+  "tcp_pitch_deg": 0.0,
+  "tcp_roll_deg": 0.0,
+  "weight_kg": 0.22,
+  "mesh_path": null,
+  "color": "#00e5ff"
+}

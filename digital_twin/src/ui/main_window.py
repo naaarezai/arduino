@@ -54,6 +54,7 @@ class MainWindow(QMainWindow):
         self._robot_stream_index: int = 0
 
         self._init_ui()
+        self.kinematics.set_active_tool(self.visualizer_3d.active_tool)
         self._setup_shortcuts()
         self._connect_signals()
 
@@ -166,6 +167,11 @@ class MainWindow(QMainWindow):
         btn_part.setStyleSheet(btn_style_cam)
         btn_part.clicked.connect(self._on_import_workpiece)
         view_bar.addWidget(btn_part)
+
+        btn_tool = QPushButton("Tool & TCP...")
+        btn_tool.setStyleSheet(btn_style_cam)
+        btn_tool.clicked.connect(self._open_tool_dialog)
+        view_bar.addWidget(btn_tool)
 
         self.btn_view_envelope = QPushButton("Reach Envelope")
         self.btn_view_envelope.setCheckable(True)
@@ -290,6 +296,18 @@ class MainWindow(QMainWindow):
         btn_calib.clicked.connect(self._open_calibration_dialog)
         h_layout.addWidget(btn_calib)
 
+        # Tool & TCP Setup Button
+        btn_tool_layout = QPushButton("End-Effector & TCP Setup (Tool Snap & Coordinates)...")
+        btn_tool_layout.setStyleSheet("""
+            QPushButton {
+                background: #252526; color: #4fc1ff; font-weight: 600; font-size: 11px;
+                border: 1px solid #007acc; border-radius: 3px; padding: 7px;
+            }
+            QPushButton:hover { background: #007acc; color: white; }
+        """)
+        btn_tool_layout.clicked.connect(self._open_tool_dialog)
+        h_layout.addWidget(btn_tool_layout)
+
         # Full Slider Panel for fine calibration
         self.slider_panel = SliderPanel(
             on_angles_changed_callback=self._on_angles_changed,
@@ -410,6 +428,27 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("3D Interactive Jog Gizmo aktiivinen: Raahaa TCP-palloa hiirellä 3D-ikkunassa.")
         else:
             self.status_bar.showMessage("3D Interactive Gizmo suljettu.")
+
+    def _open_tool_dialog(self) -> None:
+        """Opens Tool & TCP setup dialog for mounting tools and configuring TCP offsets."""
+        from src.ui.tool_dialog import ToolManagerDialog
+        dlg = ToolManagerDialog(
+            tool_manager=self.visualizer_3d.tool_manager,
+            on_apply_callback=self._on_tool_applied,
+            parent=self
+        )
+        dlg.exec_()
+
+    def _on_tool_applied(self, tool) -> None:
+        """Applies new tool profile to kinematics engine, 3D visualizer, and HUD."""
+        self.kinematics.set_active_tool(tool)
+        self.visualizer_3d.set_active_tool(tool)
+        sim_angles = self._get_current_sim_angles()
+        self._on_angles_changed(sim_angles, sim_angles)
+        self.status_bar.showMessage(
+            f"Aktiivinen työkalu: {tool.name} (TCP X={tool.tcp_x:.1f}, Y={tool.tcp_y:.1f}, Z={tool.tcp_z:.1f} mm)",
+            5000
+        )
 
     def _on_program_changed(self) -> None:
         """Refreshes 3D trajectory path when statements change."""

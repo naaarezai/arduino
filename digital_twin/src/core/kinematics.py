@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.config import LINK_0_HEIGHT, LINK_1_LENGTH, LINK_2_LENGTH, LINK_3_LENGTH
+from src.core.tool_data import ToolProfile
 
 
 def translation_matrix(x: float, y: float, z: float) -> np.ndarray:
@@ -75,11 +76,18 @@ class RobotKinematics:
                  l0: float = LINK_0_HEIGHT,
                  l1: float = LINK_1_LENGTH,
                  l2: float = LINK_2_LENGTH,
-                 l3: float = LINK_3_LENGTH):
+                 l3: float = LINK_3_LENGTH,
+                 active_tool: Optional[ToolProfile] = None):
         self.l0 = l0
         self.l1 = l1
         self.l2 = l2
-        self.l3 = l3
+        self.active_tool = active_tool or ToolProfile()
+        self.l3 = 50.0 + self.active_tool.tcp_z if self.active_tool else l3
+
+    def set_active_tool(self, tool: ToolProfile) -> None:
+        """Sets active tool profile and updates TCP calculations."""
+        self.active_tool = tool
+        self.l3 = 50.0 + tool.tcp_z
 
     def forward_kinematics(self, joint_angles_deg: List[float]) -> PoseData:
         """
@@ -121,12 +129,19 @@ class RobotKinematics:
         r5 = rot_z_matrix(j5 - math.pi / 2.0)
         t_link5 = t_wrist_flange @ r5
 
-        # Gripper base: Mounted on Link 5 flange
+        # Tool Flange (t_flange = t_link5)
         t_gripper = t_link5
 
-        # Gripper Tool Center Point (TCP): fingertip contact point
-        tool_reach = max(10.0, self.l3 - 50.0)
-        t_tcp = t_gripper @ translation_matrix(0, 0, tool_reach)
+        # Tool Center Point (TCP) with 6-DOF tool offset (X, Y, Z, Pitch, Roll)
+        r_pitch = rot_y_matrix(math.radians(self.active_tool.tcp_pitch_deg))
+        r_roll = rot_z_matrix(math.radians(self.active_tool.tcp_roll_deg))
+        t_tool_offset = translation_matrix(
+            self.active_tool.tcp_x,
+            self.active_tool.tcp_y,
+            self.active_tool.tcp_z
+        ) @ r_pitch @ r_roll
+
+        t_tcp = t_gripper @ t_tool_offset
 
         # Extract TCP Cartesian coordinates
         tcp_x = float(t_tcp[0, 3])
