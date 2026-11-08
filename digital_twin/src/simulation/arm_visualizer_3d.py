@@ -34,9 +34,15 @@ class ArmVisualizer3D(QWidget):
         layout.addWidget(self.plotter.interactor)
 
         # Style plotter environment
-        self.plotter.set_background("#181a1f", top="#282c34")  # Modern dark gradient
+        self.plotter.set_background("#16181c", top="#242830")  # Professional dark studio gradient
         self.plotter.show_axes()
         self.plotter.enable_anti_aliasing()
+
+        # Industrial studio lighting setup
+        light_key = pv.Light(position=(900, -900, 1200), focal_point=(0, 0, 200), intensity=0.85, color="white")
+        light_fill = pv.Light(position=(-700, 700, 800), focal_point=(0, 0, 200), intensity=0.4, color="#b0bec5")
+        self.plotter.add_light(light_key)
+        self.plotter.add_light(light_fill)
 
         # Actors storage
         self.actors: List[pv.Actor] = []
@@ -58,15 +64,27 @@ class ArmVisualizer3D(QWidget):
         self.reset_camera()
 
     def _add_floor(self) -> None:
-        """Adds workspace baseplate and reach circle."""
+        """Adds industrial CAD floor platform, concentric distance rings, and coordinate cross."""
         floor = pv.Disc(center=(0, 0, -2), inner=0, outer=550, normal=(0, 0, 1), r_res=60)
-        self.plotter.add_mesh(floor, color="#21252b", opacity=0.85, show_edges=False)
+        self.plotter.add_mesh(floor, color="#1c2025", opacity=0.92, show_edges=False)
 
-        reach_ring = pv.Disc(center=(0, 0, -1), inner=575, outer=580, normal=(0, 0, 1), r_res=80)
-        self.plotter.add_mesh(reach_ring, color="#00bcd4", opacity=0.3)
+        # Concentric distance rings (100, 200, 300, 400, 500 mm)
+        for r in range(100, 550, 100):
+            ring = pv.Disc(center=(0, 0, -1.5), inner=r - 0.7, outer=r + 0.7, normal=(0, 0, 1), r_res=60)
+            self.plotter.add_mesh(ring, color="#2e3842", opacity=0.55)
+
+        # Reach boundary ring (575 mm)
+        reach_ring = pv.Disc(center=(0, 0, -1.0), inner=574, outer=576, normal=(0, 0, 1), r_res=80)
+        self.plotter.add_mesh(reach_ring, color="#00bcd4", opacity=0.4)
+
+        # Coordinate axes cross on the floor
+        axis_x = pv.Line((-500, 0, -1), (500, 0, -1)).tube(radius=0.6)
+        axis_y = pv.Line((0, -500, -1), (0, 500, -1)).tube(radius=0.6)
+        self.plotter.add_mesh(axis_x, color="#ff5252", opacity=0.4)
+        self.plotter.add_mesh(axis_y, color="#69f0ae", opacity=0.4)
 
     def _init_robot_actors(self) -> None:
-        """Loads STL models with exact kinematic alignment and splits gripper for animation."""
+        """Loads STL models with exact kinematic alignment, normal smoothing, and industrial PBR materials."""
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
         # Coordinate alignment matrix for arm links: X_orig -> Y_new, Y_orig -> Z_new, Z_orig -> X_new
@@ -82,30 +100,33 @@ class ArmVisualizer3D(QWidget):
         if base_f.is_file():
             base_m = pv.read(str(base_f))
             base_m = base_m.translate((-base_m.center[0], -base_m.center[1], -base_m.bounds[4]), inplace=False)
+            base_m = base_m.compute_normals(auto_orient_normals=True)
         else:
             base_m = self._make_procedural_base()
-        self.actors.append(self.plotter.add_mesh(base_m, color="#37474f", smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(base_m, color="#2a2e33", specular=0.3, specular_power=15, smooth_shading=True))
 
         # 2. Link 1 (Turntable top plate sitting at Z = 100 on top of base)
         l1_f = MODELS_DIR / "link1.stl"
         if l1_f.is_file():
             l1_m = pv.read(str(l1_f))
             l1_m = l1_m.translate((-l1_m.center[0], -l1_m.center[1], 100.0 - l1_m.bounds[4]), inplace=False)
+            l1_m = l1_m.compute_normals(auto_orient_normals=True)
         else:
             l1_m = self._make_procedural_link1()
-        self.actors.append(self.plotter.add_mesh(l1_m, color="#455a64", smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l1_m, color="#373d44", specular=0.4, specular_power=20, smooth_shading=True))
 
-        # 3. Link 2 (Upper Arm - arm1.stl): Pivot hole at (0, 0, 0), hinge pin along Y, extends along +Z
+        # 3. Link 2 (Upper Arm - arm1.stl): Industrial high-vis cyan
         l2_f = MODELS_DIR / "link2.stl"
         if l2_f.is_file():
             l2_m = pv.read(str(l2_f))
             l2_m = l2_m.translate((0, 15.0, 0), inplace=False)
             l2_m = l2_m.transform(mat_align, inplace=False)
+            l2_m = l2_m.compute_normals(auto_orient_normals=True)
         else:
             l2_m = self._make_procedural_link2()
-        self.actors.append(self.plotter.add_mesh(l2_m, color="#00bcd4", smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l2_m, color="#00838f", specular=0.5, specular_power=25, smooth_shading=True))
 
-        # 4. Link 3 (Forearm - arm1.stl): Pivot hole at (0, 0, 0), hinge pin along Y, extends along +Z
+        # 4. Link 3 (Forearm - arm1.stl): Precision silver-white
         l3_f = MODELS_DIR / "link3.stl"
         if not l3_f.is_file() and l2_f.is_file():
             l3_f = l2_f
@@ -113,27 +134,30 @@ class ArmVisualizer3D(QWidget):
             l3_m = pv.read(str(l3_f))
             l3_m = l3_m.translate((0, 15.0, 0), inplace=False)
             l3_m = l3_m.transform(mat_align, inplace=False)
+            l3_m = l3_m.compute_normals(auto_orient_normals=True)
         else:
             l3_m = self._make_procedural_link3()
-        self.actors.append(self.plotter.add_mesh(l3_m, color="#eceff1", smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l3_m, color="#eceff1", specular=0.45, specular_power=20, smooth_shading=True))
 
-        # 5. Link 4 (Ranne - ranne.stl): Wrist pitch bracket, ear holes at (0, 0, 0), pin along Y
+        # 5. Link 4 (Ranne - ranne.stl): Industrial orange safety accent
         l4_f = MODELS_DIR / "link4.stl"
         if l4_f.is_file():
             l4_m = pv.read(str(l4_f))
             l4_m = l4_m.transform(mat_align, inplace=False)
+            l4_m = l4_m.compute_normals(auto_orient_normals=True)
         else:
             l4_m = self._make_procedural_link4()
-        self.actors.append(self.plotter.add_mesh(l4_m, color="#ff9800", smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l4_m, color="#e65100", specular=0.4, specular_power=20, smooth_shading=True))
 
-        # 6. Link 5 (Tarttujan runkolevy - link5.stl): Wrist roll plate, bottom at Z = 0
+        # 6. Link 5 (Tarttujan runkolevy - link5.stl): Anodized dark bracket
         l5_f = MODELS_DIR / "link5.stl"
         if l5_f.is_file():
             l5_m = pv.read(str(l5_f))
             l5_m = l5_m.translate((-l5_m.center[0], -l5_m.center[1], -l5_m.bounds[4]), inplace=False)
+            l5_m = l5_m.compute_normals(auto_orient_normals=True)
         else:
             l5_m = self._make_procedural_link5()
-        self.actors.append(self.plotter.add_mesh(l5_m, color="#263238", smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l5_m, color="#212529", specular=0.3, specular_power=15, smooth_shading=True))
 
         # 7. Gripper (Split into animated components: center mount, left finger, right finger)
         grip_f = MODELS_DIR / "gripper.stl"
@@ -141,6 +165,7 @@ class ArmVisualizer3D(QWidget):
             grip_m = pv.read(str(grip_f))
             grip_m = grip_m.translate((-16.2, -46.3, -30.0), inplace=False)
             grip_m = grip_m.rotate_x(-90, point=(0, 0, 0), inplace=False)
+            grip_m = grip_m.compute_normals(auto_orient_normals=True)
 
             bodies = grip_m.split_bodies()
             base_poly = pv.PolyData()
@@ -156,19 +181,19 @@ class ArmVisualizer3D(QWidget):
                 else:
                     base_poly = base_poly + b
 
-            self.gripper_base_actor = self.plotter.add_mesh(base_poly, color="#37474f", smooth_shading=True)
-            self.gripper_left_actor = self.plotter.add_mesh(left_poly, color="#cfd8dc", smooth_shading=True)
-            self.gripper_right_actor = self.plotter.add_mesh(right_poly, color="#cfd8dc", smooth_shading=True)
+            self.gripper_base_actor = self.plotter.add_mesh(base_poly, color="#37474f", specular=0.4, smooth_shading=True)
+            self.gripper_left_actor = self.plotter.add_mesh(left_poly, color="#b0bec5", specular=0.6, specular_power=30, smooth_shading=True)
+            self.gripper_right_actor = self.plotter.add_mesh(right_poly, color="#b0bec5", specular=0.6, specular_power=30, smooth_shading=True)
         else:
             grip_m = self._make_procedural_gripper()
-            self.gripper_base_actor = self.plotter.add_mesh(grip_m, color="#cfd8dc", smooth_shading=True)
+            self.gripper_base_actor = self.plotter.add_mesh(grip_m, color="#b0bec5", smooth_shading=True)
 
         # TCP Coordinate Indicator Sphere
-        tcp_sphere = pv.Sphere(radius=8, center=(0, 0, 0))
+        tcp_sphere = pv.Sphere(radius=7, center=(0, 0, 0))
         self.tcp_actor = self.plotter.add_mesh(
             tcp_sphere,
-            color="#ff4081",
-            ambient=0.9,
+            color="#00e5ff",
+            ambient=0.85,
             render_points_as_spheres=True
         )
 

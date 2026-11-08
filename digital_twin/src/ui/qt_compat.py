@@ -19,9 +19,10 @@ try:
         QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QStatusBar,
         QMessageBox, QFileDialog, QFrame, QCheckBox, QTabWidget,
         QRadioButton, QButtonGroup, QDoubleSpinBox,
-        QTreeWidget, QTreeWidgetItem, QProgressBar, QToolBar, QAction
+        QTreeWidget, QTreeWidgetItem, QProgressBar, QToolBar, QAction,
+        QShortcut
     )
-    from PyQt5.QtGui import QColor, QFont, QIcon, QPalette
+    from PyQt5.QtGui import QColor, QFont, QIcon, QPalette, QKeySequence
 except Exception as e:
     # Fallback to PyQt6
     from PyQt6.QtCore import (
@@ -33,7 +34,8 @@ except Exception as e:
         QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QStatusBar,
         QMessageBox, QFileDialog, QFrame, QCheckBox, QTabWidget,
         QRadioButton, QButtonGroup, QDoubleSpinBox,
-        QTreeWidget, QTreeWidgetItem, QProgressBar, QToolBar
+        QTreeWidget, QTreeWidgetItem, QProgressBar, QToolBar,
+        QShortcut
     )
-    from PyQt6.QtGui import QColor, QFont, QIcon, QPalette, QAction
+    from PyQt6.QtGui import QColor, QFont, QIcon, QPalette, QAction, QKeySequence
 

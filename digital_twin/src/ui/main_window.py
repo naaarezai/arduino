@@ -21,7 +21,7 @@ from src.ui.slider_panel import SliderPanel
 from src.ui.qt_compat import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QSplitter, QStatusBar, QMessageBox, Qt, QFrame, QPushButton,
-    QTabWidget, QTimer
+    QTabWidget, QTimer, QShortcut, QKeySequence
 )
 
 
@@ -33,7 +33,7 @@ class MainWindow(QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🦾 Visual Components OLP & Digital Twin — 6-DOF Robottikäsivarsi")
+        self.setWindowTitle("Robot OLP Studio — 6-DOF Industrial Twin")
         self.resize(1380, 880)
         self.setMinimumSize(1000, 700)
 
@@ -51,10 +51,25 @@ class MainWindow(QMainWindow):
         self._robot_stream_index: int = 0
 
         self._init_ui()
+        self._setup_shortcuts()
         self._connect_signals()
 
         # Seed initial default home pose
         self._on_angles_changed([90, 90, 90, 90, 90, 40], [90, 90, 90, 90, 90, 40])
+
+    def _setup_shortcuts(self) -> None:
+        """Configures industry-standard hotkeys for simulation and program editing."""
+        QShortcut(QKeySequence("Space"), self, self._toggle_play_pause)
+        QShortcut(QKeySequence("Ctrl+S"), self, self.statement_tree._save_program)
+        QShortcut(QKeySequence("Ctrl+O"), self, self.statement_tree._load_program)
+        QShortcut(QKeySequence("Delete"), self, self.statement_tree._delete_selected)
+        QShortcut(QKeySequence("Ctrl+H"), self, lambda: self._apply_angles_to_arm([90, 90, 90, 90, 90, 40]))
+
+    def _toggle_play_pause(self) -> None:
+        if self.sim_panel.timer.isActive():
+            self.sim_panel.pause_simulation()
+        else:
+            self.sim_panel.play_simulation()
 
     def _init_ui(self) -> None:
         central_widget = QWidget(self)
@@ -68,26 +83,26 @@ class MainWindow(QMainWindow):
         ribbon_bar = QHBoxLayout()
         ribbon_bar.setSpacing(6)
 
-        title_lbl = QLabel("🦾 VISUAL COMPONENTS OLP")
-        title_lbl.setStyleSheet("color: #00e5ff; font-weight: bold; font-size: 13px; padding-right: 12px;")
+        title_lbl = QLabel("ROBOT OLP STUDIO")
+        title_lbl.setStyleSheet("color: #4fc1ff; font-weight: 700; font-size: 13px; letter-spacing: 0.5px; padding-right: 14px;")
         ribbon_bar.addWidget(title_lbl)
 
-        self.btn_tab_program = QPushButton("📝 Program (OLP)")
-        self.btn_tab_sim = QPushButton("🚀 Simulation")
-        self.btn_tab_home = QPushButton("🏠 Layout / Yhteys")
+        self.btn_tab_program = QPushButton("Program (OLP)")
+        self.btn_tab_sim = QPushButton("Simulation")
+        self.btn_tab_home = QPushButton("Layout & Connections")
 
         self.workspace_buttons = [self.btn_tab_program, self.btn_tab_sim, self.btn_tab_home]
         for idx, btn in enumerate(self.workspace_buttons):
             btn.setCheckable(True)
             btn.setStyleSheet("""
                 QPushButton {
-                    background: #21252b; color: #abb2bf; font-weight: bold; font-size: 12px;
-                    border: 1px solid #37474f; border-radius: 4px; padding: 6px 14px;
+                    background: #252526; color: #858585; font-weight: 600; font-size: 11px;
+                    border: 1px solid #333333; border-radius: 3px; padding: 6px 14px;
                 }
                 QPushButton:checked {
-                    background: #00bcd4; color: black; border-color: #80deea;
+                    background: #007acc; color: #ffffff; border-color: #0098ff;
                 }
-                QPushButton:hover:!checked { background: #2c313a; color: white; }
+                QPushButton:hover:!checked { background: #2d2d30; color: #d4d4d4; }
             """)
             btn.clicked.connect(lambda _, i=idx: self._switch_workspace(i))
             ribbon_bar.addWidget(btn)
@@ -95,11 +110,11 @@ class MainWindow(QMainWindow):
         self.btn_tab_program.setChecked(True)
         ribbon_bar.addStretch()
 
-        # Quick Online / Offline Badge in Ribbon
-        self.lbl_conn_badge = QLabel("● OFFLINE")
+        # Online / Offline Badge
+        self.lbl_conn_badge = QLabel("OFFLINE")
         self.lbl_conn_badge.setStyleSheet("""
-            background: #2c313a; color: #ff5252; font-weight: bold; font-size: 11px;
-            padding: 4px 10px; border-radius: 4px; border: 1px solid #3e4451;
+            background: #2d2d30; color: #f48771; font-weight: 600; font-size: 10px;
+            padding: 3px 10px; border-radius: 3px; border: 1px solid #3f3f46;
         """)
         ribbon_bar.addWidget(self.lbl_conn_badge)
         main_layout.addLayout(ribbon_bar)
@@ -109,7 +124,7 @@ class MainWindow(QMainWindow):
 
         # Left Container: 3D Viewport + HUD info + Camera buttons
         left_container = QFrame()
-        left_container.setStyleSheet("background: #181a1f; border-radius: 6px;")
+        left_container.setStyleSheet("background: #181818; border-radius: 4px; border: 1px solid #2d2d30;")
         left_layout = QVBoxLayout(left_container)
         left_layout.setContentsMargins(4, 4, 4, 4)
         left_layout.setSpacing(4)
@@ -118,44 +133,44 @@ class MainWindow(QMainWindow):
         view_bar = QHBoxLayout()
         view_bar.setSpacing(4)
 
-        lbl_cam = QLabel("🎥 Kamera:")
-        lbl_cam.setStyleSheet("color: #90a4ae; font-size: 11px; font-weight: bold;")
+        lbl_cam = QLabel("Camera:")
+        lbl_cam.setStyleSheet("color: #858585; font-size: 11px; font-weight: 600;")
         view_bar.addWidget(lbl_cam)
 
         btn_style_cam = """
             QPushButton {
-                background: #282c34; color: #eceff1; border: 1px solid #3e4451;
-                border-radius: 3px; padding: 3px 8px; font-size: 11px;
+                background: #252526; color: #cccccc; border: 1px solid #333333;
+                border-radius: 3px; padding: 3px 8px; font-size: 11px; font-weight: 600;
             }
-            QPushButton:hover { background: #3e4451; }
+            QPushButton:hover { background: #2d2d30; color: #ffffff; }
         """
-        btn_iso = QPushButton("Koti (3D)")
+        btn_iso = QPushButton("Isometric")
         btn_iso.setStyleSheet(btn_style_cam)
         btn_iso.clicked.connect(lambda: self.visualizer_3d.reset_camera())
         view_bar.addWidget(btn_iso)
 
-        btn_top = QPushButton("Ylhäältä")
+        btn_top = QPushButton("Top")
         btn_top.setStyleSheet(btn_style_cam)
         btn_top.clicked.connect(lambda: self.visualizer_3d.view_top())
         view_bar.addWidget(btn_top)
 
-        btn_side = QPushButton("Sivulta")
+        btn_side = QPushButton("Side")
         btn_side.setStyleSheet(btn_style_cam)
         btn_side.clicked.connect(lambda: self.visualizer_3d.view_side())
         view_bar.addWidget(btn_side)
 
         # 3D Gizmo toggle button in 3D viewport header
-        self.btn_view_gizmo = QPushButton("🎯 3D Jog Gizmo")
+        self.btn_view_gizmo = QPushButton("Interactive Gizmo")
         self.btn_view_gizmo.setCheckable(True)
         self.btn_view_gizmo.setStyleSheet("""
             QPushButton {
-                background: #263238; color: #00e5ff; font-weight: bold; font-size: 11px;
-                border: 1px solid #00acc1; border-radius: 3px; padding: 3px 8px;
+                background: #252526; color: #4fc1ff; font-weight: 600; font-size: 11px;
+                border: 1px solid #007acc; border-radius: 3px; padding: 3px 8px;
             }
             QPushButton:checked {
-                background: #00acc1; color: black; border-color: #80deea;
+                background: #007acc; color: #ffffff; border-color: #0098ff;
             }
-            QPushButton:hover:!checked { background: #37474f; }
+            QPushButton:hover:!checked { background: #2d2d30; }
         """)
         self.btn_view_gizmo.toggled.connect(self._on_gizmo_toggled_from_view)
         view_bar.addWidget(self.btn_view_gizmo)
@@ -166,8 +181,8 @@ class MainWindow(QMainWindow):
         self.hud_label = QLabel("TCP: X: 0.0 mm | Y: 0.0 mm | Z: 0.0 mm | Pitch: 0.0°")
         self.hud_label.setStyleSheet("""
             QLabel {
-                background: #21252b; color: #00e5ff; font-family: monospace;
-                font-weight: bold; padding: 4px 10px; border-radius: 4px; border: 1px solid #3e4451;
+                background: #1e1e1e; color: #4fc1ff; font-family: Consolas, monospace;
+                font-weight: 600; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 1px solid #333333;
             }
         """)
         view_bar.addWidget(self.hud_label)

@@ -19,25 +19,41 @@ from src.ui.main_window import MainWindow
 
 
 def setup_dark_theme(app: QApplication) -> None:
-    """Applies a modern dark engineering theme to the Qt application."""
+    """Applies a clean, modern CAD/OLP dark engineering theme to the Qt application."""
     app.setStyle("Fusion")
     palette = QPalette()
 
-    # Base colors
-    palette.setColor(QPalette.Window, QColor("#1e2227"))
-    palette.setColor(QPalette.WindowText, QColor("#abb2bf"))
-    palette.setColor(QPalette.Base, QColor("#181a1f"))
-    palette.setColor(QPalette.AlternateBase, QColor("#21252b"))
-    palette.setColor(QPalette.ToolTipBase, QColor("#282c34"))
+    # Refined neutral dark palette (VS Code / Visual Components standard)
+    palette.setColor(QPalette.Window, QColor("#1e1e1e"))
+    palette.setColor(QPalette.WindowText, QColor("#e0e0e0"))
+    palette.setColor(QPalette.Base, QColor("#181818"))
+    palette.setColor(QPalette.AlternateBase, QColor("#252526"))
+    palette.setColor(QPalette.ToolTipBase, QColor("#2d2d30"))
     palette.setColor(QPalette.ToolTipText, QColor("#ffffff"))
-    palette.setColor(QPalette.Text, QColor("#e06c75"))
-    palette.setColor(QPalette.Button, QColor("#282c34"))
-    palette.setColor(QPalette.ButtonText, QColor("#abb2bf"))
-    palette.setColor(QPalette.BrightText, QColor("#ff4081"))
-    palette.setColor(QPalette.Highlight, QColor("#00bcd4"))
+    palette.setColor(QPalette.Text, QColor("#e0e0e0"))
+    palette.setColor(QPalette.Button, QColor("#2d2d30"))
+    palette.setColor(QPalette.ButtonText, QColor("#e0e0e0"))
+    palette.setColor(QPalette.BrightText, QColor("#ffffff"))
+    palette.setColor(QPalette.Highlight, QColor("#007acc"))
     palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
 
     app.setPalette(palette)
+
+    # Clean typography and subtle border styling across all widgets
+    app.setStyleSheet("""
+        QWidget {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 11px;
+            color: #d4d4d4;
+        }
+        QToolTip {
+            background-color: #252526;
+            color: #ffffff;
+            border: 1px solid #3f3f46;
+            padding: 4px 8px;
+            border-radius: 3px;
+        }
+    """)
 
 
 def main():

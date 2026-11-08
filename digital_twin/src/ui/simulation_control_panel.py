@@ -22,7 +22,7 @@ class SimulationControlPanel(QGroupBox):
                  on_frame_tick_fn: Optional[Callable[[int], None]] = None,
                  on_execute_robot_fn: Optional[Callable[[List[List[int]]], None]] = None,
                  parent=None):
-        super().__init__("Simulaation ja Robotin Ohjaus (Simulation)", parent)
+        super().__init__("Simulation Execution & Analysis", parent)
         self.program = program
         self.get_angles = get_angles_fn
         self.apply_angles = apply_angles_fn
@@ -52,38 +52,38 @@ class SimulationControlPanel(QGroupBox):
 
         btn_style_play = """
             QPushButton {
-                background: #2e7d32; color: white; font-weight: bold; font-size: 13px;
-                border-radius: 4px; padding: 8px 14px;
+                background: #1e5a22; color: #ffffff; font-weight: 600; font-size: 12px;
+                border: 1px solid #2e7d32; border-radius: 3px; padding: 7px 14px;
             }
-            QPushButton:hover { background: #388e3c; }
-            QPushButton:pressed { background: #1b5e20; }
+            QPushButton:hover { background: #2e7d32; }
+            QPushButton:pressed { background: #143d17; }
         """
         btn_style_pause = """
             QPushButton {
-                background: #f57f17; color: white; font-weight: bold; font-size: 13px;
-                border-radius: 4px; padding: 8px 14px;
+                background: #6e4b00; color: #ffffff; font-weight: 600; font-size: 12px;
+                border: 1px solid #996800; border-radius: 3px; padding: 7px 14px;
             }
-            QPushButton:hover { background: #fbc02d; }
+            QPushButton:hover { background: #996800; }
         """
         btn_style_stop = """
             QPushButton {
-                background: #c62828; color: white; font-weight: bold; font-size: 13px;
-                border-radius: 4px; padding: 8px 14px;
+                background: #5a1e1e; color: #ffffff; font-weight: 600; font-size: 12px;
+                border: 1px solid #7d2e2e; border-radius: 3px; padding: 7px 14px;
             }
-            QPushButton:hover { background: #d32f2f; }
+            QPushButton:hover { background: #7d2e2e; }
         """
 
-        self.btn_play = QPushButton("▶️ Toista")
+        self.btn_play = QPushButton("Run Simulation")
         self.btn_play.setStyleSheet(btn_style_play)
         self.btn_play.clicked.connect(self.play_simulation)
         row_play.addWidget(self.btn_play)
 
-        self.btn_pause = QPushButton("⏸️ Tauko")
+        self.btn_pause = QPushButton("Pause")
         self.btn_pause.setStyleSheet(btn_style_pause)
         self.btn_pause.clicked.connect(self.pause_simulation)
         row_play.addWidget(self.btn_pause)
 
-        self.btn_stop = QPushButton("⏹️ Pysäytä")
+        self.btn_stop = QPushButton("Stop")
         self.btn_stop.setStyleSheet(btn_style_stop)
         self.btn_stop.clicked.connect(self.stop_simulation)
         row_play.addWidget(self.btn_stop)
@@ -93,8 +93,8 @@ class SimulationControlPanel(QGroupBox):
         # 2. Speed Multipliers Row
         row_speed = QHBoxLayout()
         row_speed.setSpacing(4)
-        lbl_speed = QLabel("Simulaationopeus:")
-        lbl_speed.setStyleSheet("color: #90a4ae; font-size: 11px; font-weight: bold;")
+        lbl_speed = QLabel("Simulation Speed:")
+        lbl_speed.setStyleSheet("color: #858585; font-size: 11px; font-weight: 600;")
         row_speed.addWidget(lbl_speed)
 
         self.speed_buttons: List[QPushButton] = []
@@ -105,13 +105,13 @@ class SimulationControlPanel(QGroupBox):
                 btn.setChecked(True)
             btn.setStyleSheet("""
                 QPushButton {
-                    background: #263238; color: #eceff1; border: 1px solid #37474f;
-                    border-radius: 3px; padding: 3px 8px; font-size: 11px; font-weight: bold;
+                    background: #252526; color: #cccccc; border: 1px solid #3f3f46;
+                    border-radius: 3px; padding: 3px 8px; font-size: 11px; font-weight: 600;
                 }
                 QPushButton:checked {
-                    background: #00bcd4; color: black; border-color: #80deea;
+                    background: #007acc; color: white; border-color: #0098ff;
                 }
-                QPushButton:hover:!checked { background: #37474f; }
+                QPushButton:hover:!checked { background: #2d2d30; color: #ffffff; }
             """)
             btn.clicked.connect(lambda _, val=s: self._set_speed(val))
             self.speed_buttons.append(btn)
@@ -127,31 +127,31 @@ class SimulationControlPanel(QGroupBox):
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
-                background: #181a1f; border: 1px solid #37474f; border-radius: 3px; height: 12px;
+                background: #181818; border: 1px solid #333333; border-radius: 2px; height: 10px;
             }
             QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00bcd4, stop:1 #69f0ae);
-                border-radius: 2px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #007acc, stop:1 #4fc1ff);
+                border-radius: 1px;
             }
         """)
         layout.addWidget(self.progress_bar)
 
-        self.lbl_status = QLabel("Valmiina toistoon (0 käskyä).")
-        self.lbl_status.setStyleSheet("color: #abb2bf; font-size: 11px;")
+        self.lbl_status = QLabel("Ready for simulation (0 statements).")
+        self.lbl_status.setStyleSheet("color: #858585; font-size: 11px;")
         layout.addWidget(self.lbl_status)
 
-        # 4. Big "🦾 Aja robotilla (Arduino)" Button
-        self.btn_execute_robot = QPushButton("🦾 AJA ROBOTILLA (ARDUINO)")
+        # 4. Big "Execute on Robot (Arduino)" Button
+        self.btn_execute_robot = QPushButton("Execute Routine on Arduino Hardware")
         self.btn_execute_robot.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e65100, stop:1 #ff8f00);
-                color: white; font-weight: bold; font-size: 13px;
-                border: 1px solid #ffa726; border-radius: 5px; padding: 10px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #a04e00, stop:1 #c56200);
+                color: #ffffff; font-weight: 600; font-size: 12px;
+                border: 1px solid #e67e22; border-radius: 4px; padding: 9px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f57c00, stop:1 #ffa726);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #b85a00, stop:1 #d96d00);
             }
-            QPushButton:pressed { background: #bf360c; }
+            QPushButton:pressed { background: #783a00; }
         """)
         self.btn_execute_robot.clicked.connect(self._execute_on_robot)
         layout.addWidget(self.btn_execute_robot)
@@ -233,3 +233,4 @@ class SimulationControlPanel(QGroupBox):
             self.on_execute_robot(angle_list)
         # Also play simulation visually!
         self.play_simulation()
+

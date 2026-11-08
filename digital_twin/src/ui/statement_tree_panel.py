@@ -25,7 +25,7 @@ class StatementTreePanel(QGroupBox):
                  apply_angles_fn: Callable[[List[int]], None],
                  on_program_changed_fn: Optional[Callable[[], None]] = None,
                  parent=None):
-        super().__init__("Ohjelmalista (Statement Tree / OLP)", parent)
+        super().__init__("Program Statement Tree (OLP)", parent)
         self.program = program
         self.get_current_angles = get_current_angles_fn
         self.apply_angles = apply_angles_fn
@@ -45,45 +45,48 @@ class StatementTreePanel(QGroupBox):
 
         btn_style_ptp = """
             QPushButton {
-                background: #00838f; color: white; font-weight: bold; font-size: 11px;
-                border: 1px solid #00acc1; border-radius: 4px; padding: 5px 8px;
+                background: #007acc; color: white; font-weight: 600; font-size: 11px;
+                border: 1px solid #0098ff; border-radius: 3px; padding: 5px 9px;
             }
-            QPushButton:hover { background: #00acc1; }
+            QPushButton:hover { background: #0098ff; }
+            QPushButton:pressed { background: #005a9e; }
         """
         btn_style_lin = """
             QPushButton {
-                background: #e65100; color: white; font-weight: bold; font-size: 11px;
-                border: 1px solid #fb8c00; border-radius: 4px; padding: 5px 8px;
+                background: #c56200; color: white; font-weight: 600; font-size: 11px;
+                border: 1px solid #e67e22; border-radius: 3px; padding: 5px 9px;
             }
-            QPushButton:hover { background: #fb8c00; }
+            QPushButton:hover { background: #e67e22; }
+            QPushButton:pressed { background: #a04e00; }
         """
         btn_style_act = """
             QPushButton {
-                background: #37474f; color: #eceff1; font-weight: bold; font-size: 11px;
-                border: 1px solid #455a64; border-radius: 4px; padding: 5px 8px;
+                background: #2d2d30; color: #cccccc; font-weight: 600; font-size: 11px;
+                border: 1px solid #3f3f46; border-radius: 3px; padding: 5px 9px;
             }
-            QPushButton:hover { background: #455a64; border-color: #00bcd4; }
+            QPushButton:hover { background: #3e3e42; color: #ffffff; border-color: #007acc; }
+            QPushButton:pressed { background: #1e1e1e; }
         """
 
-        self.btn_add_ptp = QPushButton("➕ PTP (Piste)")
+        self.btn_add_ptp = QPushButton("+ PTP Motion")
         self.btn_add_ptp.setStyleSheet(btn_style_ptp)
         self.btn_add_ptp.setToolTip("Lisää nykyinen asento PTP-siirtona")
         self.btn_add_ptp.clicked.connect(self._add_ptp)
         tb_layout.addWidget(self.btn_add_ptp)
 
-        self.btn_add_lin = QPushButton("━ LIN (Hitsaus)")
+        self.btn_add_lin = QPushButton("+ Linear Motion")
         self.btn_add_lin.setStyleSheet(btn_style_lin)
         self.btn_add_lin.setToolTip("Lisää suora Cartesian-hitsaussauma")
         self.btn_add_lin.clicked.connect(self._add_lin)
         tb_layout.addWidget(self.btn_add_lin)
 
-        self.btn_add_grip = QPushButton("✊ Koura")
+        self.btn_add_grip = QPushButton("+ Gripper")
         self.btn_add_grip.setStyleSheet(btn_style_act)
         self.btn_add_grip.setToolTip("Lisää kouran avaus- tai sulkukäsky")
         self.btn_add_grip.clicked.connect(self._add_gripper_action)
         tb_layout.addWidget(self.btn_add_grip)
 
-        self.btn_add_delay = QPushButton("⏳ Viive")
+        self.btn_add_delay = QPushButton("+ Dwell")
         self.btn_add_delay.setStyleSheet(btn_style_act)
         self.btn_add_delay.setToolTip("Lisää pito/viive hitsauspisteeseen")
         self.btn_add_delay.clicked.connect(self._add_delay)
@@ -95,25 +98,25 @@ class StatementTreePanel(QGroupBox):
         # 2. Main Statement Tree
         self.tree = QTreeWidget()
         self.tree.setColumnCount(3)
-        self.tree.setHeaderLabels(["Käsky / Liike", "Sijainti / Tiedot", "Nopeus / Aika"])
+        self.tree.setHeaderLabels(["Statement", "Coordinates & Joints", "Speed / Duration"])
         header = self.tree.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.tree.setStyleSheet("""
             QTreeWidget {
-                background: #181a1f; color: #eceff1; border: 1px solid #37474f;
-                border-radius: 4px; font-size: 11px;
+                background: #181818; color: #d4d4d4; border: 1px solid #333333;
+                border-radius: 3px; font-size: 11px;
             }
             QTreeWidget::item {
                 padding: 4px;
             }
             QTreeWidget::item:selected {
-                background: #2c3840; color: #00e5ff; font-weight: bold;
+                background: #094771; color: #ffffff; font-weight: 600;
             }
             QHeaderView::section {
-                background: #21252b; color: #90a4ae; font-weight: bold;
-                border: 1px solid #282c34; padding: 4px; font-size: 11px;
+                background: #252526; color: #858585; font-weight: 600;
+                border: 1px solid #2d2d30; padding: 4px; font-size: 11px;
             }
         """)
         self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
@@ -123,52 +126,63 @@ class StatementTreePanel(QGroupBox):
         act_layout = QHBoxLayout()
         act_layout.setSpacing(4)
 
-        self.btn_teach = QPushButton("🎯 Teach (Päivitä asento)")
+        self.btn_teach = QPushButton("Teach Pose")
         self.btn_teach.setStyleSheet("""
             QPushButton {
-                background: #00897b; color: white; font-weight: bold; font-size: 11px;
-                border-radius: 3px; padding: 4px 8px;
+                background: #007acc; color: white; font-weight: 600; font-size: 11px;
+                border-radius: 3px; padding: 4px 10px; border: 1px solid #0098ff;
             }
-            QPushButton:hover { background: #00bfa5; }
+            QPushButton:hover { background: #0098ff; }
         """)
         self.btn_teach.setToolTip("Päivitä valitun käskyn kohteeksi robotin nykyinen asento")
         self.btn_teach.clicked.connect(self._teach_selected)
         act_layout.addWidget(self.btn_teach)
 
-        self.btn_up = QPushButton("⬆️")
-        self.btn_up.setToolTip("Siirrä ylöspäin")
+        self.btn_up = QPushButton("▲ Up")
+        self.btn_up.setToolTip("Siirrä käsky ylemmäs")
         self.btn_up.setStyleSheet(btn_style_act)
         self.btn_up.clicked.connect(self._move_up)
         act_layout.addWidget(self.btn_up)
 
-        self.btn_down = QPushButton("⬇️")
-        self.btn_down.setToolTip("Siirrä alaspäin")
+        self.btn_down = QPushButton("▼ Down")
+        self.btn_down.setToolTip("Siirrä käsky alemmas")
         self.btn_down.setStyleSheet(btn_style_act)
         self.btn_down.clicked.connect(self._move_down)
         act_layout.addWidget(self.btn_down)
 
-        self.btn_delete = QPushButton("🗑️")
+        self.btn_delete = QPushButton("Delete")
         self.btn_delete.setToolTip("Poista valittu käsky")
-        self.btn_delete.setStyleSheet("background: #5a2020; color: white; border-radius: 3px; padding: 4px 8px;")
+        self.btn_delete.setStyleSheet("background: #6e1c1c; color: #ffcccc; border: 1px solid #852a2a; border-radius: 3px; padding: 4px 8px;")
         self.btn_delete.clicked.connect(self._delete_selected)
         act_layout.addWidget(self.btn_delete)
 
-        self.btn_clear = QPushButton("🧹 Tyhjennä")
+        self.btn_clear = QPushButton("Clear")
         self.btn_clear.setStyleSheet(btn_style_act)
         self.btn_clear.clicked.connect(self._clear_all)
         act_layout.addWidget(self.btn_clear)
 
         act_layout.addStretch()
 
-        self.btn_save = QPushButton("💾 Tallenna")
+        self.btn_save = QPushButton("Save JSON")
         self.btn_save.setStyleSheet(btn_style_act)
         self.btn_save.clicked.connect(self._save_program)
         act_layout.addWidget(self.btn_save)
 
-        self.btn_load = QPushButton("📂 Avaa")
+        self.btn_load = QPushButton("Open JSON")
         self.btn_load.setStyleSheet(btn_style_act)
         self.btn_load.clicked.connect(self._load_program)
         act_layout.addWidget(self.btn_load)
+
+        self.btn_export = QPushButton("Export Code")
+        self.btn_export.setStyleSheet("""
+            QPushButton {
+                background: #007acc; color: white; font-weight: 600; font-size: 11px;
+                border: 1px solid #0098ff; border-radius: 3px; padding: 4px 9px;
+            }
+            QPushButton:hover { background: #0098ff; }
+        """)
+        self.btn_export.clicked.connect(self._export_code)
+        act_layout.addWidget(self.btn_export)
 
         layout.addLayout(act_layout)
 
@@ -178,7 +192,7 @@ class StatementTreePanel(QGroupBox):
 
         # Root Item: MainRoutine
         root = QTreeWidgetItem(self.tree)
-        root.setText(0, f"📂 {self.program.name} ({len(self.program.statements)} käskyä)")
+        root.setText(0, f"Routine: {self.program.name} ({len(self.program.statements)} statements)")
         root.setForeground(0, QColor("#e0e0e0"))
         root.setExpanded(True)
 
@@ -186,29 +200,33 @@ class StatementTreePanel(QGroupBox):
             item = QTreeWidgetItem(root)
             item.setData(0, Qt.UserRole, i)
 
+            num_str = f"{i+1:02d}"
+
             if isinstance(stmt, MotionStatement):
                 is_lin = (stmt.statement_type == "LIN")
-                icon = "━" if is_lin else "●"
-                item.setText(0, f"{i+1}: {icon} {stmt.statement_type} {stmt.target_id}")
-                color = QColor("#ff9800") if is_lin else QColor("#00e5ff")
+                tag = "LIN" if is_lin else "PTP"
+                item.setText(0, f"{num_str}  [{tag}]  {stmt.target_id}")
+                color = QColor("#ff9d3b") if is_lin else QColor("#4fc1ff")
                 item.setForeground(0, color)
 
-                # Pose details
                 pose = self.program.kinematics.forward_kinematics([float(a) for a in stmt.angles])
-                item.setText(1, f"XYZ: [{pose.tcp_x:.0f}, {pose.tcp_y:.0f}, {pose.tcp_z:.0f}] mm | J:{stmt.angles}")
+                item.setText(1, f"TCP: [{pose.tcp_x:.1f}, {pose.tcp_y:.1f}, {pose.tcp_z:.1f}] | J:{stmt.angles}")
                 item.setText(2, f"{stmt.speed_percent}% ({stmt.duration_ms} ms)")
 
             elif isinstance(stmt, GripperStatement):
-                item.setText(0, f"{i+1}: ✊ Koura {stmt.action}")
-                item.setForeground(0, QColor("#ba68c8"))  # Purple
-                item.setText(1, f"Kulma: {stmt.target_angle}° | {stmt.comment}")
+                item.setText(0, f"{num_str}  [GRIPPER]  {stmt.action}")
+                item.setForeground(0, QColor("#c586c0"))
+                item.setText(1, f"Jaw angle: {stmt.target_angle}° | {stmt.comment}")
                 item.setText(2, f"{stmt.duration_ms} ms")
 
             elif isinstance(stmt, DelayStatement):
-                item.setText(0, f"{i+1}: ⏳ Viive / Odotus")
-                item.setForeground(0, QColor("#ffd54f"))  # Yellow
+                item.setText(0, f"{num_str}  [WAIT]  {stmt.duration_ms} ms")
+                item.setForeground(0, QColor("#dcdcaa"))
                 item.setText(1, stmt.comment)
                 item.setText(2, f"{stmt.duration_ms} ms")
+
+        if self.on_program_changed:
+            self.on_program_changed()
 
         if self.on_program_changed:
             self.on_program_changed()
@@ -320,3 +338,28 @@ class StatementTreePanel(QGroupBox):
             from pathlib import Path
             self.program.load_from_json(Path(path))
             self.refresh_tree()
+
+    def _export_code(self) -> None:
+        """Exports taught routine to standard industrial formats (G-Code, ABB RAPID, Arduino)."""
+        if not self.program.statements:
+            QMessageBox.information(self, "Export", "Lisää ensin käskyjä ohjelmalistaan ennen vientiä!")
+            return
+
+        from src.core.post_processor import RobotPostProcessor
+        filters = "G-Code File (*.nc *.gcode);;Arduino Autonomous Sketch (*.ino);;ABB RAPID Module (*.mod)"
+        path, selected_filter = QFileDialog.getSaveFileName(self, "Export Industrial Robot Code", f"{self.program.name}", filters)
+        if not path:
+            return
+
+        if ".ino" in selected_filter or path.endswith(".ino"):
+            code = RobotPostProcessor.to_arduino_sketch(self.program)
+        elif ".mod" in selected_filter or path.endswith(".mod"):
+            code = RobotPostProcessor.to_abb_rapid(self.program, self.program.kinematics)
+        else:
+            code = RobotPostProcessor.to_gcode(self.program, self.program.kinematics)
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(code)
+
+        QMessageBox.information(self, "Export Valmis", f"Ohjelmakoodi viety onnistuneesti tiedostoon:\n{path}")
+

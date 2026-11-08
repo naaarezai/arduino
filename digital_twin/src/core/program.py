@@ -276,3 +276,4 @@ class RobotProgram:
         self.name = data.get("name", "MainRoutine")
         self.statements = [Statement.from_dict(item) for item in data.get("statements", [])]
         self._target_counter = len(self.statements) + 1
+

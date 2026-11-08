@@ -24,7 +24,7 @@ class CompactJogPanel(QGroupBox):
                  apply_angles_fn: Callable[[List[int]], None],
                  on_toggle_gizmo_fn: Optional[Callable[[bool], None]] = None,
                  parent=None):
-        super().__init__("Nivel- ja Avaruusajo (Jog Panel)", parent)
+        super().__init__("Manual Jogging Controller", parent)
         self.kinematics = kinematics
         self.get_angles = get_angles_fn
         self.apply_angles = apply_angles_fn
@@ -44,12 +44,13 @@ class CompactJogPanel(QGroupBox):
         # Tab widget: Joints vs Cartesian XYZ
         self.jog_tabs = QTabWidget()
         self.jog_tabs.setStyleSheet("""
-            QTabWidget::pane { border: 1px solid #37474f; background: #21252b; border-radius: 4px; }
+            QTabWidget::pane { border: 1px solid #333333; background: #1e1e1e; border-radius: 3px; }
             QTabBar::tab {
-                background: #263238; color: #abb2bf; padding: 4px 10px; font-size: 11px; font-weight: bold;
-                border-top-left-radius: 3px; border-top-right-radius: 3px;
+                background: #252526; color: #858585; padding: 5px 12px; font-size: 11px; font-weight: 600;
+                border-top-left-radius: 3px; border-top-right-radius: 3px; margin-right: 2px;
             }
-            QTabBar::tab:selected { background: #00bcd4; color: black; }
+            QTabBar::tab:selected { background: #007acc; color: #ffffff; }
+            QTabBar::tab:hover:!selected { background: #2d2d30; color: #d4d4d4; }
         """)
 
         # Tab 1: Joint Jogging (J1..J6)
@@ -60,20 +61,20 @@ class CompactJogPanel(QGroupBox):
 
         btn_step_style = """
             QPushButton {
-                background: #37474f; color: #eceff1; border: 1px solid #455a64;
-                border-radius: 3px; padding: 2px 6px; font-weight: bold; font-size: 11px;
+                background: #2d2d30; color: #d4d4d4; border: 1px solid #3f3f46;
+                border-radius: 3px; padding: 3px 6px; font-weight: 600; font-size: 11px;
             }
-            QPushButton:hover { background: #455a64; border-color: #00bcd4; }
-            QPushButton:pressed { background: #263238; }
+            QPushButton:hover { background: #3e3e42; color: #ffffff; border-color: #007acc; }
+            QPushButton:pressed { background: #1e1e1e; }
         """
 
-        short_names = ["J1 Base", "J2 Shld", "J3 Elbw", "J4 Ptch", "J5 Roll", "J6 Grip"]
+        short_names = ["J1 Base", "J2 Shoulder", "J3 Elbow", "J4 Pitch", "J5 Roll", "J6 Gripper"]
         for i in range(6):
             row = QHBoxLayout()
             row.setSpacing(3)
 
             lbl = QLabel(short_names[i])
-            lbl.setStyleSheet("color: #cfd8dc; font-size: 11px; font-weight: bold; min-width: 50px;")
+            lbl.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: 600; min-width: 65px;")
             row.addWidget(lbl)
 
             btn_m5 = QPushButton("-5°")
@@ -92,8 +93,8 @@ class CompactJogPanel(QGroupBox):
             spin.setValue(90 if i < 5 else 40)
             spin.setStyleSheet("""
                 QSpinBox {
-                    background: #263238; color: white; border: 1px solid #37474f;
-                    border-radius: 3px; padding: 2px 4px; font-weight: bold; min-width: 45px;
+                    background: #252526; color: #ffffff; border: 1px solid #3f3f46;
+                    border-radius: 3px; padding: 2px 4px; font-weight: 600; min-width: 48px;
                 }
             """)
             spin.valueChanged.connect(lambda val, idx=i: self._on_spin_changed(idx, val))
@@ -110,8 +111,8 @@ class CompactJogPanel(QGroupBox):
             btn_p5.clicked.connect(lambda _, idx=i: self._step_joint(idx, 5))
             row.addWidget(btn_p5)
 
-            chk_inv = QCheckBox("Inv")
-            chk_inv.setStyleSheet("color: #78909c; font-size: 10px;")
+            chk_inv = QCheckBox("Invert")
+            chk_inv.setStyleSheet("color: #858585; font-size: 10px;")
             if i == 1:
                 chk_inv.setChecked(True)
             self.invert_checkboxes.append(chk_inv)
@@ -119,7 +120,7 @@ class CompactJogPanel(QGroupBox):
 
             j_layout.addLayout(row)
 
-        self.jog_tabs.addTab(tab_joints, "Nivelet (J1..J6)")
+        self.jog_tabs.addTab(tab_joints, "Joint Axes (J1..J6)")
 
         # Tab 2: Cartesian XYZ Jogging
         tab_xyz = QWidget()
@@ -128,64 +129,64 @@ class CompactJogPanel(QGroupBox):
         x_layout.setSpacing(4)
 
         axes_info = [
-            ("X (Eteen)", lambda: self._step_cartesian(dx=-10), lambda: self._step_cartesian(dx=10)),
-            ("Y (Sivu)",  lambda: self._step_cartesian(dy=-10), lambda: self._step_cartesian(dy=10)),
-            ("Z (Korkeus)", lambda: self._step_cartesian(dz=-10), lambda: self._step_cartesian(dz=10)),
-            ("Pitch (Kulma)", lambda: self._step_cartesian(dp=-5), lambda: self._step_cartesian(dp=5)),
+            ("X-Axis (Depth)", lambda: self._step_cartesian(dx=-10), lambda: self._step_cartesian(dx=10)),
+            ("Y-Axis (Lateral)", lambda: self._step_cartesian(dy=-10), lambda: self._step_cartesian(dy=10)),
+            ("Z-Axis (Height)", lambda: self._step_cartesian(dz=-10), lambda: self._step_cartesian(dz=10)),
+            ("Tool Pitch", lambda: self._step_cartesian(dp=-5), lambda: self._step_cartesian(dp=5)),
         ]
 
         for name, fn_minus, fn_plus in axes_info:
             row = QHBoxLayout()
             row.setSpacing(4)
             lbl = QLabel(name)
-            lbl.setStyleSheet("color: #cfd8dc; font-size: 11px; font-weight: bold; min-width: 75px;")
+            lbl.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: 600; min-width: 90px;")
             row.addWidget(lbl)
 
-            btn_m = QPushButton("◀ -10 mm" if "Pitch" not in name else "◀ -5°")
+            btn_m = QPushButton("-10 mm" if "Pitch" not in name else "-5°")
             btn_m.setStyleSheet(btn_step_style)
             btn_m.clicked.connect(fn_minus)
             row.addWidget(btn_m)
 
-            btn_p = QPushButton("+10 mm ▶" if "Pitch" not in name else "+5° ▶")
+            btn_p = QPushButton("+10 mm" if "Pitch" not in name else "+5°")
             btn_p.setStyleSheet(btn_step_style)
             btn_p.clicked.connect(fn_plus)
             row.addWidget(btn_p)
 
             x_layout.addLayout(row)
 
-        # 3D Gizmo Toggle
-        self.btn_gizmo = QPushButton("🎯 3D Interactive Jog Gizmo (Päällä)")
+        # 3D Gizmo Toggle Button
+        self.btn_gizmo = QPushButton("3D Interactive TCP Drag Gizmo")
         self.btn_gizmo.setCheckable(True)
         self.btn_gizmo.setChecked(False)
         self.btn_gizmo.setStyleSheet("""
             QPushButton {
-                background: #263238; color: #00e5ff; font-weight: bold; font-size: 11px;
-                border: 1px solid #00acc1; border-radius: 4px; padding: 6px;
+                background: #252526; color: #4fc1ff; font-weight: 600; font-size: 11px;
+                border: 1px solid #007acc; border-radius: 3px; padding: 6px;
             }
             QPushButton:checked {
-                background: #00acc1; color: black; border-color: #80deea;
+                background: #007acc; color: #ffffff; border-color: #0098ff;
             }
-            QPushButton:hover:!checked { background: #37474f; }
+            QPushButton:hover:!checked { background: #2d2d30; }
         """)
         self.btn_gizmo.toggled.connect(self._on_gizmo_toggled)
         x_layout.addWidget(self.btn_gizmo)
 
-        self.jog_tabs.addTab(tab_xyz, "Avaruus XYZ (IK)")
+        self.jog_tabs.addTab(tab_xyz, "Cartesian (XYZ & Pitch)")
         layout.addWidget(self.jog_tabs)
 
         # Presets Row
         presets_layout = QHBoxLayout()
         presets_layout.setSpacing(4)
-        for label, preset in [("Koti", [90, 90, 90, 90, 90, 40]),
-                             ("Valmis", [90, 110, 130, 40, 90, 40]),
-                             ("Kurotus", [90, 135, 90, 45, 90, 40])]:
+        for label, preset in [("Home Pose", [90, 90, 90, 90, 90, 40]),
+                             ("Ready Pose", [90, 110, 130, 40, 90, 40]),
+                             ("Reach Pose", [90, 135, 90, 45, 90, 40])]:
             btn = QPushButton(label)
             btn.setStyleSheet("""
                 QPushButton {
-                    background: #282c34; color: #abb2bf; border: 1px solid #3e4451;
-                    border-radius: 3px; padding: 3px 6px; font-size: 11px;
+                    background: #252526; color: #858585; border: 1px solid #333333;
+                    border-radius: 3px; padding: 3px 8px; font-size: 11px;
                 }
-                QPushButton:hover { background: #3e4451; color: white; }
+                QPushButton:hover { background: #2d2d30; color: #ffffff; }
             """)
             btn.clicked.connect(lambda _, p=preset: self.apply_angles(p))
             presets_layout.addWidget(btn)
@@ -246,3 +247,4 @@ class CompactJogPanel(QGroupBox):
 
     def get_physical_angles(self) -> List[int]:
         return self.to_physical_angles(self.get_angles())
+
