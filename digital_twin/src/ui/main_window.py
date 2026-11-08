@@ -108,7 +108,7 @@ class MainWindow(QMainWindow):
 
         self.btn_tab_program = QPushButton("Program (OLP)")
         self.btn_tab_sim = QPushButton("Simulation")
-        self.btn_tab_home = QPushButton("Layout & Connections")
+        self.btn_tab_home = QPushButton("Layout && Connections")
 
         self.workspace_buttons = [self.btn_tab_program, self.btn_tab_sim, self.btn_tab_home]
         for idx, btn in enumerate(self.workspace_buttons):
@@ -223,7 +223,7 @@ class MainWindow(QMainWindow):
         view_bar.addWidget(btn_part)
 
         # Demo fixtures dropdown button
-        btn_demo_fixture = QPushButton("📦 Esimerkkikappaleet ▼")
+        btn_demo_fixture = QPushButton("📦 Kappaleet ▼")
         btn_demo_fixture.setStyleSheet(btn_style_cam)
         menu_demo = QMenu(self)
         menu_demo.setStyleSheet("""
@@ -250,7 +250,7 @@ class MainWindow(QMainWindow):
         btn_pos_part.clicked.connect(self._open_workpiece_dialog)
         view_bar.addWidget(btn_pos_part)
 
-        btn_tool = QPushButton("Tool & TCP...")
+        btn_tool = QPushButton("Tool && TCP...")
         btn_tool.setStyleSheet(btn_style_cam)
         btn_tool.clicked.connect(self._open_tool_dialog)
         view_bar.addWidget(btn_tool)
@@ -434,7 +434,7 @@ class MainWindow(QMainWindow):
         h_layout.addWidget(self.conn_bar)
 
         # Hardware Zero-Offset Calibration Button
-        btn_calib = QPushButton("Hardware Zero-Offset & Trim Calibration...")
+        btn_calib = QPushButton("Hardware Zero-Offset && Trim Calibration...")
         btn_calib.setStyleSheet("""
             QPushButton {
                 background: #252526; color: #4fc1ff; font-weight: 600; font-size: 11px;
@@ -446,7 +446,7 @@ class MainWindow(QMainWindow):
         h_layout.addWidget(btn_calib)
 
         # Tool & TCP Setup Button
-        btn_tool_layout = QPushButton("End-Effector & TCP Setup (Tool Snap & Coordinates)...")
+        btn_tool_layout = QPushButton("End-Effector && TCP Setup (Tool Snap && Coordinates)...")
         btn_tool_layout.setStyleSheet("""
             QPushButton {
                 background: #252526; color: #4fc1ff; font-weight: 600; font-size: 11px;
@@ -573,7 +573,14 @@ class MainWindow(QMainWindow):
 
                 tag = f"J{i+1}: {val}°"
                 if i == 5:
-                    tag += " (Koura)"
+                    tool_type = getattr(self.kinematics.active_tool, "tool_type", "GRIPPER")
+                    tool_tags = {
+                        "GRIPPER": "Koura",
+                        "WELDING_TORCH": "Poltin",
+                        "VACUUM": "Imukuppi",
+                        "DISPENSER": "Annostin"
+                    }
+                    tag += f" ({tool_tags.get(tool_type, 'Työkalu')})"
                 self.joint_labels[i].setText(tag)
 
                 if self._last_joint_states[i] != state_key:

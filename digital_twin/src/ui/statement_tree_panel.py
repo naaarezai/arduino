@@ -357,7 +357,7 @@ class PickAndPlaceDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         btn_box.addWidget(btn_cancel)
 
-        btn_gen = QPushButton("Generoi Pick & Place")
+        btn_gen = QPushButton("Generoi Pick && Place")
         btn_gen.setStyleSheet("background: #0284c7; color: white; font-weight: bold; padding: 6px 14px; border-radius: 3px;")
         btn_gen.clicked.connect(self._generate)
         btn_box.addWidget(btn_gen)
@@ -607,7 +607,7 @@ class StatementTreePanel(QGroupBox):
         self.btn_grip_custom.clicked.connect(self._add_gripper_action)
         grip_l.addWidget(self.btn_grip_custom)
 
-        self.btn_pick_place = QPushButton("📦 Pick & Place -apuri")
+        self.btn_pick_place = QPushButton("📦 Pick && Place -apuri")
         self.btn_pick_place.setStyleSheet("""
             QPushButton {
                 background: #0284c7; color: white; font-weight: 600; font-size: 11px;
@@ -642,7 +642,7 @@ class StatementTreePanel(QGroupBox):
         self.btn_vac_off.clicked.connect(lambda: self._add_tool_action("VACUUM", "OFF"))
         vac_l.addWidget(self.btn_vac_off)
 
-        self.btn_vac_pnp = QPushButton("📦 Pick & Place -apuri")
+        self.btn_vac_pnp = QPushButton("📦 Pick && Place -apuri")
         self.btn_vac_pnp.setStyleSheet("""
             QPushButton {
                 background: #6b21a8; color: white; font-weight: 600; font-size: 11px;

@@ -1,12 +1,43 @@
-# 🦾 6-Akselinen Robottikäsivarsi (6-DOF) — Flutter & Arduino Uno R4 WiFi
+# 🦾 6-Akselinen Teollisuusrobottikäsivarsi (6-DOF) — OLP Studio, Flutter & Arduino Uno R4 WiFi
 
-Tämä repositorio sisältää täydellisen, testatun ja tuotantovalmiin robottikäsivarren langattoman ohjausjärjestelmän. Järjestelmä yhdistää modernin **Flutter (Dart)** -mobiilisovelluksen ja **Arduino Uno R4 WiFi** -mikrokontrollerin käyttäen nopeaa ja vähävirtaista **Bluetooth Low Energy (BLE)** -tiedonsiirtoa.
+Tämä repositorio sisältää täydellisen, testatun ja ammattilaistasoisen robottikäsivarren ohjaus-, simulaatio- ja offline-ohjelmointijärjestelmän (OLP). Järjestelmä koostuu kolmesta saumattomasti integroidusta kokonaisuudesta:
 
-Projektissa on toteutettu teollisuusrobottien ohjauksesta tutut ominaisuudet: **3D-avaruuden Karteesinen XYZ-ohjaus**, **käänteinen kinematiikka (Inverse Kinematics / IK)**, **PTP (Point-to-Point)** ja **LINEAR (suoraviivainen)** liikeratasuunnittelu, **sekvensseri (Teach & Play)** sekä servojen mekaaniset turvarajat.
+1. 🖥️ **Robot OLP Studio (Digital Twin & OLP):** Python/PyQt/PyVista-pohjainen teollisuustason työpöytäohjelmisto (vastaa Visual Components / ABB RobotStudio / KUKA Sim -työkaluja). Sisältää 3D-kinematiikan, interaktiivisen Gizmon, automaattisen hitsausratasuunnittelijan (MIG/MAG 45°, Weave, Multi-Pass), Pick & Place -apurin, G-Code & ABB RAPID -kääntäjät sekä reaaliaikaisen USB-ohjauksen (115200 baud).
+2. 📱 **Mobiiliohjaus (Flutter App):** Moderni Android-sovellus langattomaan BLE (Bluetooth Low Energy) -ohjaukseen, 2D-kinematiikkanäytöllä ja kosketusnäyttösekvensserillä.
+3. ⚡ **Arduino Uno R4 WiFi -laiteohjelmisto:** Reaaliaikainen laitteisto-ohjain sulavalla S-curve-interpolaatiolla, LED-matriisi-statuksella ja kaksoisohjauksella (BLE & USB-sarjaportti).
 
 ---
 
-## 📱 Pika-aloitus: Lataa valmis sovellus puhelimeen (APK)
+## 🖥️ Työpöytä: Robot OLP Studio (3D Digital Twin)
+
+### 🚀 Pika-aloitus (Yhdellä klikkauksella):
+Kaksoisnapsauta projektin juurikansiosta:
+👉 **`run_digital_twin.bat`**
+
+*Tai komentoriviltä:*
+```powershell
+cd digital_twin
+python -m pip install -r requirements.txt
+python main.py
+```
+
+### ✨ Keskeiset OLP-ominaisuudet:
+* **Täysi 3D-interaktio:** Vapaa kameran kierto, isometriset kuvakulmat, ulottuvuusalue (Reach Envelope) ja interaktiivinen 3D TCP Gizmo.
+* **Dynaamiset työkalupalkit:** Työkalupalkki mukautuu aktiivisen työkalun mukaan:
+  * **Koura (Gripper):** Tartu, päästä, säädä leukakulmaa (40°–128°) ja luo automaattinen **Pick & Place** -siirto.
+  * **Hitsauspoltin (MIG/MAG Torch 45°):** 2-Click Seam -automaattihitsaus, Weld Wizard, railokudonta (Weave) ja monipalkohitsaus (Multi-Pass).
+  * **Imukuppi (Vacuum) & Annostelusuutin (Dispenser):** Työkalukohtaiset komennot ja trajektorit.
+* **Koodin reaaliaikainen kääntö:** Esikatsele ja vie liikeradat suoraan:
+  * **Arduino C++** (`moveJoints()`, `toolAction()`)
+  * **Standardi G-Koodi** (G0/G1, M8/M9)
+  * **ABB RAPID** (`MoveJ`, `MoveL`, `SetDO`)
+* **Pysyvä projektitallennus:** Tallenna koko ohjelmapuu, kappaleen sijainti ja TCP-asetukset yhdellä painikkeella (`.project.json`).
+
+📖 **[Lue täysi Robot OLP Studio -dokumentaatio tästä (digital_twin/README.md)](digital_twin/README.md)**
+
+---
+
+## 📱 Mobiili: Lataa valmis sovellus puhelimeen (APK)
 
 Etkö halua asentaa kehitysympäristöä tai koodata? Voit ladata valmiin ja testatun asennuspaketin suoraan Android-puhelimeesi:
 
@@ -189,35 +220,22 @@ Seuraavalle kehitystiimille tiedoksi projektin aikana ratkaistut kriittiset tekn
 ```text
 Arduino/
 ├── .gitignore
-├── README.md                                  # Tämä dokumentti
-├── arduino_firmware/
+├── README.md                                  # Pääohje ja arkkitehtuurikuvaus
+├── run_digital_twin.bat                       # Yhden klikkauksen käynnistin 3D OLP Studiolle
+├── digital_twin/                              # 🖥️ Robot OLP Studio (Python + PyQt + PyVista)
+│   ├── README.md                              # OLP Studion kattava käyttö- ja kehittäjädokumentaatio
+│   ├── main.py                                # Työpöytäsovelluksen pääkäynnistys
+│   ├── requirements.txt                       # Python-riippuvuudet (PyVista, PyQt5/6, pySerial jne.)
+│   ├── assets/models/                         # Robotin 3D CAD STL -osat (Linkit 1-5, Koura, Hitsauspoltin)
+│   ├── src/                                   # Kinematiikka, sekvensseri, OLP-puu, kääntäjät ja UI
+│   └── tests/                                 # Automaattiset yksikkö- ja integraatiotestit (20 testiä)
+├── arduino_firmware/                          # ⚡ Arduino Uno R4 WiFi firmware
 │   └── arduino_arm_controller/
-│       └── arduino_arm_controller.ino         # Arduino Uno R4 WiFi firmware (BLE, LED Matrix, Smooth Easing)
-└── robot_arm_app/                             # Flutter-mobiilisovellus
-    ├── assets/
-    │   └── images/
-    │       └── logo.jpeg                      # Sovelluksen logo
-    ├── lib/
-    │   ├── main.dart                          # Sovelluksen pääkäynnistys ja teemat
-    │   ├── kinematics/
-    │   │   └── arm_kinematics.dart            # FK, IK, PTP ja Linear kinematiikkamoottori
-    │   ├── models/
-    │   │   └── arm_state.dart                 # Tietomallit (Nivelet, Asennot, Sekvenssit)
-    │   ├── services/
-    │   │   ├── ble_service.dart               # Bluetooth Low Energy -palvelu ja kuristus
-    │   │   └── storage_service.dart           # Pysyväistallennus (SharedPreferences)
-    │   └── ui/
-    │       ├── screens/
-    │       │   ├── splash_screen.dart         # Animoitu käynnistysruutu
-    │       │   ├── home_screen.dart           # Päänäkymä (välilehdet, tilarivi, hätäseis)
-    │       │   └── ble_scan_dialog.dart       # BLE-laitteiden skannaus ja paritusdialogi
-    │       └── widgets/
-    │           ├── arm_visualizer.dart        # 2D-vektorikinematiikan visualisoija ja HUD
-    │           ├── joint_slider_card.dart     # Servokohtaiset säätökortit
-    │           └── xyz_controller_card.dart   # Karteesinen XYZ-ohjainpaneeli ja askelvalitsin
-    ├── test/
-    │   ├── kinematics_test.dart               # Kinematiikan matemaattiset yksikkötestit
-    │   └── widget_test.dart                   # Savutestit
+│       └── arduino_arm_controller.ino         # BLE + USB 115200 sarjaohjain, LED-matriisi, S-curve
+└── robot_arm_app/                             # 📱 Flutter-mobiilisovellus (Android)
+    ├── assets/images/logo.jpeg                # Sovelluksen logo
+    ├── lib/                                   # Dart-koodi (BLE, Kinematiikka, UI, Sekvensseri)
+    ├── test/                                  # Yksikkötestit
     └── pubspec.yaml                           # Riippuvuudet ja asetukset
 ```
 
