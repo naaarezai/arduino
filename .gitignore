@@ -24,6 +24,10 @@ robot_arm_app/ios/.symlinks/
 robot_arm_app/ios/Flutter/Flutter.framework
 robot_arm_app/ios/Flutter/Flutter.podspec
 
+# Autodesk Inventor backup files
+**/OldVersions/
+*.bak
+
 # System & Editor files
 *.apk
 .DS_Store

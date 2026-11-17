@@ -42,7 +42,7 @@ def export_project_data(
             "pos": list(workpiece_pos) if workpiece_pos else [260.0, 0.0, 0.0],
             "rot_z": float(workpiece_rot_z)
         },
-        "current_angles": list(current_angles) if current_angles else [90, 90, 90, 90, 90, 40]
+        "current_angles": list(current_angles) if current_angles else [90, 90, 90, 90, 90, 20]
     }
 
 

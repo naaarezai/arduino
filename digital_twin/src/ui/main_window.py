@@ -14,6 +14,7 @@ from src.config import JOINT_LIMITS
 from src.core.calibration import CalibrationManager
 from src.core.kinematics import RobotKinematics
 from src.core.program import RobotProgram, MotionStatement
+from src.communication.ble_worker import BleWorker
 from src.communication.serial_worker import SerialWorker
 from src.simulation.arm_visualizer_3d import ArmVisualizer3D
 from src.ui.calibration_dialog import CalibrationDialog
@@ -47,9 +48,11 @@ class MainWindow(QMainWindow):
         self.program = RobotProgram(kinematics=self.kinematics, name="MainRoutine")
         self.calibration = CalibrationManager()
         self.serial_worker = SerialWorker(self)
+        self.ble_worker = BleWorker(self)
 
         # Connection & streaming state
         self.is_online: bool = False
+        self.active_transport: Optional[str] = None  # "USB" or "BLE"
         self.stream_timer = QTimer(self)
         self.stream_timer.setInterval(35)
         self.stream_timer.timeout.connect(self._on_robot_stream_tick)
@@ -70,7 +73,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
 
         # Seed initial default home pose
-        self._on_angles_changed([90, 90, 90, 90, 90, 40], [90, 90, 90, 90, 90, 40])
+        self._on_angles_changed([90, 90, 90, 90, 90, 20], [90, 90, 90, 90, 90, 20])
 
     def _setup_shortcuts(self) -> None:
         """Configures industry-standard hotkeys for simulation and program editing."""
@@ -80,7 +83,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Shift+S"), self, self._save_project)
         QShortcut(QKeySequence("Ctrl+Shift+O"), self, self._load_project)
         QShortcut(QKeySequence("Delete"), self, self.statement_tree._delete_selected)
-        QShortcut(QKeySequence("Ctrl+H"), self, lambda: self._apply_angles_to_arm([90, 90, 90, 90, 90, 40]))
+        QShortcut(QKeySequence("Ctrl+H"), self, lambda: self._apply_angles_to_arm([90, 90, 90, 90, 90, 20]))
         QShortcut(QKeySequence("Esc"), self, self._emergency_stop)
         QShortcut(QKeySequence("Ctrl+T"), self, self._open_tool_dialog)
 
@@ -425,10 +428,11 @@ class MainWindow(QMainWindow):
         h_layout.setContentsMargins(0, 0, 0, 0)
         h_layout.setSpacing(8)
 
-        # Connection Bar
+        # Connection Bar (USB Serial & Wireless BLE)
         self.conn_bar = ConnectionBar(
             on_connect_callback=self._handle_connect,
             on_disconnect_callback=self._handle_disconnect,
+            on_ble_connect_callback=self._handle_ble_connect,
             parent=self
         )
         h_layout.addWidget(self.conn_bar)
@@ -506,11 +510,17 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Virhe", "Kappaleen STL-tiedostoa ei voitu ladata.")
 
     def _connect_signals(self) -> None:
-        self.serial_worker.connected.connect(self._on_serial_connected)
-        self.serial_worker.disconnected.connect(self._on_serial_disconnected)
+        self.serial_worker.connected.connect(lambda p: self._on_transport_connected(p, "USB"))
+        self.serial_worker.disconnected.connect(self._on_transport_disconnected)
         self.serial_worker.data_received.connect(self._on_serial_data_received)
         self.serial_worker.packet_sent.connect(self._on_serial_packet_sent)
         self.serial_worker.error_occurred.connect(self._on_serial_error)
+
+        self.ble_worker.connected.connect(lambda label: self._on_transport_connected(label, "BLE"))
+        self.ble_worker.disconnected.connect(self._on_transport_disconnected)
+        self.ble_worker.data_received.connect(self._on_serial_data_received)
+        self.ble_worker.packet_sent.connect(self._on_serial_packet_sent)
+        self.ble_worker.error_occurred.connect(self._on_serial_error)
 
     def _get_current_sim_angles(self) -> List[int]:
         return self.slider_panel.get_angles()
@@ -590,10 +600,9 @@ class MainWindow(QMainWindow):
                         f"font-size: 11px; font-weight: 600; padding: 2px 7px; border: 1px solid {color}; border-radius: 3px; }}"
                     )
 
-        # 6. Stream calibrated angles to Arduino if online and not running batch sequence
+        # 6. Stream calibrated angles to Arduino (USB or BLE) if online and not running batch sequence
         if self.is_online and not self.stream_timer.isActive() and not self.sim_panel.timer.isActive():
-            phys_calib = self.calibration.to_physical(sim_angles)
-            self.serial_worker.send_angles(phys_calib)
+            self._send_hardware_angles(sim_angles)
 
     def _on_weld_tick(self, angles: List[int]) -> None:
         """Deposits weld bead segment at current TCP pose during LIN welding motion."""
@@ -666,9 +675,12 @@ class MainWindow(QMainWindow):
     def _emergency_stop(self) -> None:
         """Immediate hardware & simulation safety stop (E-STOP)."""
         self.sim_panel.stop_simulation()
+        if self.stream_timer.isActive():
+            self.stream_timer.stop()
         if self.is_online:
             self.serial_worker.emergency_stop()
-        self.status_bar.showMessage("⛔ HÄTÄ-SEIS AKTIIVINEN! Kaikki liike ja sarjaliikenne pysäytetty välittömästi.", 10000)
+            self.ble_worker.emergency_stop()
+        self.status_bar.showMessage("⛔ HÄTÄ-SEIS AKTIIVINEN! Kaikki liike ja laiteyhteys pysäytetty välittömästi.", 10000)
         self.hud_label.setText("⛔ HÄTÄ-SEIS AKTIIVINEN — KAIKKI LIIKE PYSÄYTETTY")
         self.hud_label.setStyleSheet("QLabel { background: #500000; color: #ffffff; font-family: Consolas, monospace; font-weight: bold; font-size: 11px; padding: 3px 10px; border-radius: 3px; border: 2px solid #ff1744; }")
 
@@ -983,14 +995,29 @@ class MainWindow(QMainWindow):
         if hasattr(self, "sim_panel"):
             self.sim_panel.update_program_stats()
 
+    def _get_active_worker(self):
+        """Returns active hardware communication worker ('BLE' or 'USB')."""
+        if self.active_transport == "BLE":
+            return self.ble_worker
+        if self.active_transport == "USB":
+            return self.serial_worker
+        return None
+
+    def _send_hardware_angles(self, sim_angles: List[int]) -> None:
+        """Translates simulation angles through calibration offsets and queues to active worker."""
+        worker = self._get_active_worker()
+        if worker is not None:
+            phys_calib = self.calibration.to_physical(sim_angles)
+            worker.send_angles(phys_calib)
+
     def _on_execute_robot(self, trajectory: List[List[int]]) -> None:
-        """Streams compiled statement path directly to Arduino via SerialWorker."""
+        """Streams compiled statement path directly to Arduino via USB Serial or BLE."""
         if not self.is_online:
             QMessageBox.warning(
                 self,
                 "Robotti Offline",
-                "Robotti ei ole yhdistetty sarjaporttiin!\n\n"
-                "Yhdistä Arduino USB-kaapelilla 'Layout & Connections' -näkymästä ennen fyysistä ajoa.\n"
+                "Robotti ei ole yhdistetty USB:llä eikä Bluetoothilla!\n\n"
+                "Yhdistä Arduino USB-kaapelilla tai Bluetoothilla (BLE) 'Layout & Connections' -näkymästä ennen fyysistä ajoa.\n"
                 "Voit sillä välin testata liikkeen 'Run Simulation' -painikkeella näytöllä."
             )
             return
@@ -1010,8 +1037,7 @@ class MainWindow(QMainWindow):
             return
 
         frame = self._robot_stream_trajectory[self._robot_stream_index]
-        phys = self.calibration.to_physical(frame)
-        self.serial_worker.send_angles(phys)
+        self._send_hardware_angles(frame)
 
         if self._robot_stream_index % 10 == 0 or self._robot_stream_index == len(self._robot_stream_trajectory) - 1:
             self.status_bar.showMessage(f"Ajo robotilla: {self._robot_stream_index + 1} / {len(self._robot_stream_trajectory)}...")
@@ -1019,27 +1045,38 @@ class MainWindow(QMainWindow):
         self._robot_stream_index += 1
 
     def _handle_connect(self, port: str, baudrate: int) -> None:
-        self.status_bar.showMessage(f"Yhdistetään porttiin {port} ({baudrate} baud)...")
+        self.active_transport = "USB"
+        self.status_bar.showMessage(f"Yhdistetään USB-porttiin {port} ({baudrate} baud)...")
         self.serial_worker.connect_serial(port, baudrate)
+
+    def _handle_ble_connect(self, address: str, name: str) -> None:
+        self.active_transport = "BLE"
+        self.status_bar.showMessage(f"Yhdistetään Bluetooth-laitteeseen {name} ({address})...")
+        self.ble_worker.connect_ble(address, name)
 
     def _handle_disconnect(self) -> None:
         if self.stream_timer.isActive():
             self.stream_timer.stop()
-        self.serial_worker.disconnect_serial("Käyttäjä sulki yhteyden")
+        if self.active_transport == "BLE":
+            self.ble_worker.disconnect_ble("Käyttäjä sulki Bluetooth-yhteyden")
+        else:
+            self.serial_worker.disconnect_serial("Käyttäjä sulki yhteyden")
 
-    def _on_serial_connected(self, port: str) -> None:
+    def _on_transport_connected(self, label: str, transport: str) -> None:
+        self.active_transport = transport
         self.is_online = True
-        self.conn_bar.set_online_ui(port)
-        self.lbl_conn_badge.setText(f"● ONLINE ({port})")
+        self.conn_bar.set_online_ui(label)
+        self.lbl_conn_badge.setText(f"● ONLINE ({label})")
         self.lbl_conn_badge.setStyleSheet("""
             background: #004d40; color: #69f0ae; font-weight: bold; font-size: 11px;
             padding: 4px 10px; border-radius: 4px; border: 1px solid #00bfa5;
         """)
-        self.status_bar.showMessage(f"Yhteys muodostettu: {port}. Robotti synkronoitu!")
-        self.serial_worker.send_angles(self.compact_jog.get_physical_angles())
+        self.status_bar.showMessage(f"Yhteys muodostettu: {label}. Robotti synkronoitu!")
+        self._send_hardware_angles(self._get_current_sim_angles())
 
-    def _on_serial_disconnected(self, reason: str) -> None:
+    def _on_transport_disconnected(self, reason: str) -> None:
         self.is_online = False
+        self.active_transport = None
         if self.stream_timer.isActive():
             self.stream_timer.stop()
         self.conn_bar.set_offline_ui(reason)
@@ -1062,5 +1099,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if self.stream_timer.isActive():
             self.stream_timer.stop()
+        self.conn_bar.stop_scan()
         self.serial_worker.disconnect_serial("Sovellus suljettiin")
+        self.ble_worker.disconnect_ble("Sovellus suljettiin")
         event.accept()

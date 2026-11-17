@@ -29,7 +29,7 @@ class Statement:
             return MotionStatement(
                 statement_type=st_type,
                 target_id=data.get("target_id", "P1"),
-                angles=list(data.get("angles", [90, 90, 90, 90, 90, 40])),
+                angles=list(data.get("angles", [90, 90, 90, 90, 90, 20])),
                 speed_percent=data.get("speed_percent", 100),
                 duration_ms=data.get("duration_ms", 1500),
                 comment=data.get("comment", "")
@@ -37,7 +37,7 @@ class Statement:
         elif st_type == "GRIPPER":
             return GripperStatement(
                 action=data.get("action", "CLOSE"),
-                target_angle=data.get("target_angle", 128),
+                target_angle=data.get("target_angle", 180),
                 duration_ms=data.get("duration_ms", 500),
                 comment=data.get("comment", "")
             )
@@ -53,7 +53,7 @@ class Statement:
                 duration_ms=data.get("duration_ms", 500),
                 comment=data.get("comment", "")
             )
-        return MotionStatement("PTP", "P1", [90, 90, 90, 90, 90, 40])
+        return MotionStatement("PTP", "P1", [90, 90, 90, 90, 90, 20])
 
 
 @dataclass
@@ -61,7 +61,7 @@ class MotionStatement(Statement):
     """PTP or LINEAR robot motion statement."""
     statement_type: str = "PTP"  # "PTP" or "LIN"
     target_id: str = "P1"
-    angles: List[int] = field(default_factory=lambda: [90, 90, 90, 90, 90, 40])
+    angles: List[int] = field(default_factory=lambda: [90, 90, 90, 90, 90, 20])
     speed_percent: int = 100
     duration_ms: int = 1500
     comment: str = ""
@@ -81,8 +81,8 @@ class MotionStatement(Statement):
 class GripperStatement(Statement):
     """Gripper actuation statement (Open, Close, Set Angle)."""
     statement_type: str = "GRIPPER"
-    action: str = "CLOSE"         # "CLOSE" (128°), "OPEN" (40°), or "CUSTOM"
-    target_angle: int = 128
+    action: str = "CLOSE"         # "CLOSE" (180°), "OPEN" (20°), or "CUSTOM"
+    target_angle: int = 180
     duration_ms: int = 500
     comment: str = ""
 
@@ -160,7 +160,7 @@ class RobotProgram:
 
     def add_gripper(self, action: str = "CLOSE", target_angle: Optional[int] = None, comment: str = "") -> GripperStatement:
         if target_angle is None:
-            target_angle = 128 if action == "CLOSE" else 40
+            target_angle = 180 if action == "CLOSE" else 20
         stmt = GripperStatement(
             action=action,
             target_angle=target_angle,
@@ -278,7 +278,7 @@ class RobotProgram:
 
             elif isinstance(stmt, GripperStatement):
                 label = f"Koura: {stmt.action}"
-                start_j6 = curr[5] if len(curr) >= 6 else 40
+                start_j6 = curr[5] if len(curr) >= 6 else 20
                 end_j6 = stmt.target_angle
                 eff_duration = max(200, int(stmt.duration_ms / speed_multiplier))
                 steps = max(4, int(eff_duration / step_dt_ms))

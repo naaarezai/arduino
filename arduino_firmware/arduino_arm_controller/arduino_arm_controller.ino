@@ -39,13 +39,14 @@ Servo servos[NUM_SERVOS];
 const int servoPins[NUM_SERVOS] = {PIN_SERVO_1, PIN_SERVO_2, PIN_SERVO_3,
                                    PIN_SERVO_4, PIN_SERVO_5, PIN_SERVO_6};
 
-// Nykyiset ja tavoitekulmat (0 - 180 astetta, Servo 6 rajattu 40 - 128 astetta)
-float currentAngles[NUM_SERVOS] = {90.0, 90.0, 90.0, 90.0, 90.0, 40.0};
-float targetAngles[NUM_SERVOS] = {90.0, 90.0, 90.0, 90.0, 90.0, 40.0};
+// Nykyiset ja tavoitekulmat (Servo 6 koura rajattu 20 - 180 astetta: alle 20
+// irtoaa hammasratas!)
+float currentAngles[NUM_SERVOS] = {90.0, 90.0, 90.0, 90.0, 90.0, 20.0};
+float targetAngles[NUM_SERVOS] = {90.0, 90.0, 90.0, 90.0, 90.0, 20.0};
 
-// Mekaaniset kulmarajat (Servo 6 koura rajattu välille 40 - 128 astetta)
-const int minAngles[NUM_SERVOS] = {0, 0, 0, 0, 0, 40};
-const int maxAngles[NUM_SERVOS] = {180, 180, 180, 180, 180, 128};
+// Mekaaniset kulmarajat (Servo 6 koura rajattu välille 20 - 180 astetta)
+const int minAngles[NUM_SERVOS] = {0, 0, 0, 0, 0, 20};
+const int maxAngles[NUM_SERVOS] = {180, 180, 180, 180, 180, 180};
 
 // Liikkeen pehmennysnopeus (asteina per askel)
 const float SPEED_STEP = 1.0;
@@ -91,10 +92,12 @@ void setup() {
   matrix.begin();
   matrix.loadFrame(iconBluetooth);
 
-  // Alustetaan servot ja asetetaan ne alkuasentoon
+  // Alustetaan servot ja asetetaan ne alkuasentoon pehmeasti porrastaen (estaa
+  // virtapiikin)
   for (int i = 0; i < NUM_SERVOS; i++) {
-    servos[i].attach(servoPins[i]);
     servos[i].write((int)currentAngles[i]);
+    servos[i].attach(servoPins[i]);
+    delay(50);
   }
 
   // Alustetaan BLE

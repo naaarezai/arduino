@@ -1,0 +1,19 @@
+{
+  "name": "Default_Hardware",
+  "offsets": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "inversions": [
+    false,
+    true,
+    true,
+    true,
+    false,
+    false
+  ]
+}

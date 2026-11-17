@@ -16,7 +16,7 @@ class CalibrationProfile:
     """Stores mechanical zero-trim offsets and inversions for all 6 servos."""
     name: str = "Default_Hardware"
     offsets: List[int] = field(default_factory=lambda: [0, 0, 0, 0, 0, 0])
-    inversions: List[bool] = field(default_factory=lambda: [False, False, False, False, False, False])
+    inversions: List[bool] = field(default_factory=lambda: [False, True, True, True, False, False])
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -26,7 +26,7 @@ class CalibrationProfile:
         return cls(
             name=data.get("name", "Default_Hardware"),
             offsets=list(data.get("offsets", [0, 0, 0, 0, 0, 0])),
-            inversions=list(data.get("inversions", [False, False, False, False, False, False]))
+            inversions=list(data.get("inversions", [False, True, True, True, False, False]))
         )
 
 
@@ -94,7 +94,7 @@ class CalibrationManager:
             if self.is_inverted(i):
                 val = 180 - val
             val += self.get_offset(i)
-            # Enforce hardware servo boundaries (Servo 6: 40° - 128°)
+            # Enforce hardware servo boundaries (Servo 6: 20° - 180°)
             val = max(min_v, min(max_v, int(round(val))))
             phys.append(val)
         return phys

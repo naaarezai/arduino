@@ -43,8 +43,8 @@ class _HomeScreenState extends State<HomeScreen>
   Timer? _trajectoryTimer;
 
   // Servojen pyörimissuuntien kääntö (true = käännetty 180 - kulma)
-  // Oletuksena Servo 2 (Olkavarsi) on käännetty käyttäjän asennustavan mukaan
-  List<bool> _servoInversions = [false, true, false, false, false, false];
+  // Oletuksena Servot 2, 3 ja 4 ovat käännettyjä käyttäjän fyysisen robotin mukaan
+  List<bool> _servoInversions = [false, true, true, true, false, false];
 
   @override
   void initState() {
@@ -102,12 +102,12 @@ class _HomeScreenState extends State<HomeScreen>
         id: 5,
         key: 'gripper',
         nameFi: 'Koura (Tarttuja)',
-        nameEn: 'Gripper (Claw) - Pin D11 [40°-128°]',
+        nameEn: 'Gripper (Claw) - Pin D11 [20°-180°]',
         icon: Icons.back_hand,
-        angle: 40.0,
-        minAngle: 40.0,
-        maxAngle: 128.0,
-        defaultAngle: 40.0,
+        angle: 20.0,
+        minAngle: 20.0,
+        maxAngle: 180.0,
+        defaultAngle: 20.0,
       ),
     ];
 
@@ -141,8 +141,8 @@ class _HomeScreenState extends State<HomeScreen>
       final a = logical[i];
       if (_servoInversions[i]) {
         if (i == 5) {
-          // Koura 40..128
-          res.add((40 + 128 - a).clamp(40, 128));
+          // Koura 20..180
+          res.add((20 + 180 - a).clamp(20, 180));
         } else {
           res.add((180 - a).clamp(0, 180));
         }
@@ -153,7 +153,8 @@ class _HomeScreenState extends State<HomeScreen>
     return res;
   }
 
-  List<int> get _currentPhysicalAnglesInt => toPhysicalAngles(_currentAnglesInt);
+  List<int> get _currentPhysicalAnglesInt =>
+      toPhysicalAngles(_currentAnglesInt);
 
   void _onXyzMoveRequested(CartesianPose target, bool isLinear) {
     if (_isMovingTrajectory) return;
@@ -184,7 +185,9 @@ class _HomeScreenState extends State<HomeScreen>
       int stepIdx = 0;
 
       _trajectoryTimer?.cancel();
-      _trajectoryTimer = Timer.periodic(const Duration(milliseconds: 35), (timer) {
+      _trajectoryTimer = Timer.periodic(const Duration(milliseconds: 35), (
+        timer,
+      ) {
         if (!mounted || stepIdx >= trajectory.length) {
           timer.cancel();
           setState(() => _isMovingTrajectory = false);
@@ -360,7 +363,10 @@ class _HomeScreenState extends State<HomeScreen>
               builder: (context, scrollController) {
                 return ListView(
                   controller: scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
                   children: [
                     Center(
                       child: Container(
@@ -382,7 +388,11 @@ class _HomeScreenState extends State<HomeScreen>
                             SizedBox(width: 8),
                             Text(
                               "Servojen pyörimissuunnat",
-                              style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ],
                         ),
@@ -416,14 +426,18 @@ class _HomeScreenState extends State<HomeScreen>
                             names[i],
                             style: TextStyle(
                               color: Colors.white,
-                              fontWeight: _servoInversions[i] ? FontWeight.bold : FontWeight.normal,
+                              fontWeight: _servoInversions[i]
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
                               fontSize: 14,
                             ),
                           ),
                           subtitle: Text(
                             "${descriptions[i]}\nTila: ${_servoInversions[i] ? "KÄÄNNETTY (Inverted)" : "Normaali"}",
                             style: TextStyle(
-                              color: _servoInversions[i] ? Colors.cyanAccent : Colors.white38,
+                              color: _servoInversions[i]
+                                  ? Colors.cyanAccent
+                                  : Colors.white38,
                               fontSize: 11,
                             ),
                           ),
@@ -437,7 +451,9 @@ class _HomeScreenState extends State<HomeScreen>
                               _servoInversions[i] = val;
                             });
                             StorageService.saveInversions(_servoInversions);
-                            _bleService.sendAnglesImmediate(_currentPhysicalAnglesInt);
+                            _bleService.sendAnglesImmediate(
+                              _currentPhysicalAnglesInt,
+                            );
                           },
                         ),
                       );
@@ -1104,7 +1120,7 @@ class _HomeScreenState extends State<HomeScreen>
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Pikakoura auki / kiinni (40° - 128°)
+            // Pikakoura auki / kiinni (20° - 180°)
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.amberAccent.withValues(alpha: 0.2),
@@ -1115,16 +1131,16 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
               icon: Icon(
-                _joints[5].angle > 84 ? Icons.lock_open : Icons.lock,
+                _joints[5].angle > 100 ? Icons.lock_open : Icons.lock,
                 size: 16,
               ),
               label: Text(
-                _joints[5].angle > 84
-                    ? "Avaa koura (40°)"
-                    : "Sulje koura (128°)",
+                _joints[5].angle > 100
+                    ? "Avaa koura (20°)"
+                    : "Sulje koura (180°)",
               ),
               onPressed: () {
-                final newAngle = _joints[5].angle > 84 ? 40.0 : 128.0;
+                final newAngle = _joints[5].angle > 100 ? 20.0 : 180.0;
                 _onJointAngleChanged(5, newAngle);
                 _onJointAngleChangeEnd(5, newAngle);
               },

@@ -90,7 +90,7 @@ class CompactJogPanel(QGroupBox):
             spin = QSpinBox()
             min_v, max_v = JOINT_LIMITS[i]
             spin.setRange(min_v, max_v)
-            spin.setValue(90 if i < 5 else 40)
+            spin.setValue(90 if i < 5 else 20)
             spin.setStyleSheet("""
                 QSpinBox {
                     background: #252526; color: #ffffff; border: 1px solid #3f3f46;
@@ -113,7 +113,7 @@ class CompactJogPanel(QGroupBox):
 
             chk_inv = QCheckBox("Invert")
             chk_inv.setStyleSheet("color: #858585; font-size: 10px;")
-            if i == 1:
+            if i in (1, 2, 3):  # Servos 2, 3, 4 inverted
                 chk_inv.setChecked(True)
             self.invert_checkboxes.append(chk_inv)
             row.addWidget(chk_inv)
@@ -177,9 +177,9 @@ class CompactJogPanel(QGroupBox):
         # Presets Row
         presets_layout = QHBoxLayout()
         presets_layout.setSpacing(4)
-        for label, preset in [("Home Pose", [90, 90, 90, 90, 90, 40]),
-                             ("Ready Pose", [90, 110, 130, 40, 90, 40]),
-                             ("Reach Pose", [90, 135, 90, 45, 90, 40])]:
+        for label, preset in [("Home Pose", [90, 90, 90, 90, 90, 20]),
+                             ("Ready Pose", [90, 110, 130, 40, 90, 20]),
+                             ("Reach Pose", [90, 135, 90, 45, 90, 20])]:
             btn = QPushButton(label)
             btn.setStyleSheet("""
                 QPushButton {

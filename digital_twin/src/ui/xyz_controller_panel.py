@@ -153,7 +153,7 @@ class XyzControllerPanel(QGroupBox):
         target_pitch = max(-90.0, min(90.0, pose.pitch_deg + dp))
 
         roll = float(angles[4]) if len(angles) > 4 else 90.0
-        gripper = float(angles[5]) if len(angles) > 5 else 40.0
+        gripper = float(angles[5]) if len(angles) > 5 else 20.0
 
         sol = self.kinematics.inverse_kinematics(
             target_x, target_y, target_z,

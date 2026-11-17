@@ -7,7 +7,7 @@ class CartesianPose {
   final double z; // mm (korkeus pöytätasosta: +Z ylöspäin, 0 = pöytä)
   final double pitch; // astetta (-90° suoraan alas, 0° vaakasuoraan eteen, +90° suoraan ylös)
   final double roll;  // astetta (ranteen kierto 0..180)
-  final double gripper; // astetta (kouran avautuma 40..128)
+  final double gripper; // astetta (kouran avautuma 20..180)
 
   const CartesianPose({
     required this.x,
@@ -15,7 +15,7 @@ class CartesianPose {
     required this.z,
     this.pitch = 0.0,
     this.roll = 90.0,
-    this.gripper = 40.0,
+    this.gripper = 20.0,
   });
 
   CartesianPose copyWith({
@@ -116,7 +116,7 @@ class ArmKinematics {
       z: z,
       pitch: pitch,
       roll: s5,
-      gripper: s6.clamp(40.0, 128.0),
+      gripper: s6.clamp(20.0, 180.0),
     );
   }
 
@@ -226,7 +226,7 @@ class ArmKinematics {
     }
 
     final s5 = target.roll.clamp(0.0, 180.0);
-    final s6 = target.gripper.clamp(40.0, 128.0); // Servo 6 rajoitus 40-128°
+    final s6 = target.gripper.clamp(20.0, 180.0); // Servo 6 mekaaninen raja 20-180°
 
     return [s1, s2, s3, s4, s5, s6];
   }
@@ -290,7 +290,7 @@ class ArmKinematics {
       for (int j = 0; j < 6; j++) {
         final val = startAngles[j] + (targetAngles[j] - startAngles[j]) * smoothT;
         if (j == 5) {
-          stepAngles.add(val.round().clamp(40, 128)); // Servo 6 rajoitus
+          stepAngles.add(val.round().clamp(20, 180)); // Servo 6 mekaaninen raja
         } else {
           stepAngles.add(val.round().clamp(0, 180));
         }
@@ -303,6 +303,6 @@ class ArmKinematics {
   List<int> forwardKinematicsAsInt(CartesianPose pose) {
     final ik = inverseKinematics(pose);
     if (ik != null) return ik.map((a) => a.round()).toList();
-    return [90, 90, 90, 90, 90, 40];
+    return [90, 90, 90, 90, 90, 20];
   }
 }

@@ -87,27 +87,46 @@ class ArmVisualizer3D(QWidget):
         self.reset_camera()
 
     def _add_floor(self) -> None:
-        """Adds industrial CAD floor platform, concentric distance rings, and coordinate cross."""
-        floor = pv.Disc(center=(0, 0, -2), inner=0, outer=550, normal=(0, 0, 1), r_res=60)
-        self.plotter.add_mesh(floor, color="#1c2025", opacity=0.92, show_edges=False)
+        """
+        Adds realistic laboratory workcell setup matching the real physical robot:
+        1. Natural pine wood workboard (mäntyliimapuulevy) with wood tone and plank seams.
+        2. White laboratory workbench table underneath.
+        3. Black controller/phone dock accessory on the side.
+        4. Clean coordinate axes cross and workcell boundary.
+        """
+        # 1. White laboratory table underneath
+        table = pv.Cube(center=(215.0, 165.0, -28.0), x_length=1100.0, y_length=900.0, z_length=20.0)
+        self.plotter.add_mesh(table, color="#e2e8f0", specular=0.2, specular_power=10, smooth_shading=True)
 
-        # Concentric distance rings (100, 200, 300, 400, 500 mm)
-        for r in range(100, 550, 100):
-            ring = pv.Disc(center=(0, 0, -1.5), inner=r - 0.7, outer=r + 0.7, normal=(0, 0, 1), r_res=60)
-            self.plotter.add_mesh(ring, color="#2e3842", opacity=0.55)
+        # 2. Natural pine wood workboard (Mäntyliimapuulevy: 600mm x 500mm x 18mm, top surface at Z=0)
+        # Robot base (0, 0) is situated all the way in the corner in both X and Y:
+        # X: [-85.0, 515.0], Y: [-85.0, 415.0]
+        wood_board = pv.Cube(center=(215.0, 165.0, -9.0), x_length=600.0, y_length=500.0, z_length=18.0)
+        self.plotter.add_mesh(
+            wood_board,
+            color="#d4a373",  # Warm natural pine wood tone
+            specular=0.25,
+            specular_power=12,
+            smooth_shading=True
+        )
 
-        # Reach boundary ring (575 mm)
-        reach_ring = pv.Disc(center=(0, 0, -1.0), inner=574, outer=576, normal=(0, 0, 1), r_res=80)
-        self.plotter.add_mesh(reach_ring, color="#00bcd4", opacity=0.4)
+        # Longitudinal wood plank seams on pine board (realistic glued panel appearance)
+        for y_pos in (-25.0, 35.0, 95.0, 155.0, 215.0, 275.0, 335.0, 395.0):
+            seam = pv.Line((-85.0, y_pos, 0.2), (515.0, y_pos, 0.2)).tube(radius=0.4)
+            self.plotter.add_mesh(seam, color="#b08050", opacity=0.7)
 
-        # Coordinate axes cross on the floor
-        axis_x = pv.Line((-500, 0, -1), (500, 0, -1)).tube(radius=0.6)
-        axis_y = pv.Line((0, -500, -1), (0, 500, -1)).tube(radius=0.6)
-        self.plotter.add_mesh(axis_x, color="#ff5252", opacity=0.4)
-        self.plotter.add_mesh(axis_y, color="#69f0ae", opacity=0.4)
+        # Subtle coordinate cross lines on the wooden board surface (Z = 0.5mm)
+        axis_x = pv.Line((-80.0, 0.0, 0.5), (510.0, 0.0, 0.5)).tube(radius=0.7)
+        axis_y = pv.Line((0.0, -80.0, 0.5), (0.0, 410.0, 0.5)).tube(radius=0.7)
+        self.plotter.add_mesh(axis_x, color="#ef4444", opacity=0.65)  # X-Axis (Forward Red)
+        self.plotter.add_mesh(axis_y, color="#10b981", opacity=0.65)  # Y-Axis (Lateral Green)
+
+        # Subtle work reach arc on board (450 mm radius)
+        reach_arc = pv.Disc(center=(0.0, 0.0, 0.4), inner=448.5, outer=450.5, normal=(0, 0, 1), r_res=60)
+        self.plotter.add_mesh(reach_arc, color="#00bcd4", opacity=0.35)
 
     def _init_robot_actors(self) -> None:
-        """Loads STL models with exact kinematic alignment, normal smoothing, and industrial PBR materials."""
+        """Loads STL models with exact kinematic alignment and colors matching the real physical robot."""
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
         # Coordinate alignment matrix: maps STL axes to kinematic joint frame
@@ -119,7 +138,7 @@ class ArmVisualizer3D(QWidget):
             [0.0, 0.0, 0.0, 1.0]
         ], dtype=np.float64)
 
-        # 1. Base (fixed cylinder base on the floor)
+        # 1. Base (Yellow cylindrical base on wooden board) - matches real yellow PLA
         base_f = MODELS_DIR / "base.stl"
         if base_f.is_file():
             base_m = pv.read(str(base_f))
@@ -127,9 +146,9 @@ class ArmVisualizer3D(QWidget):
             base_m = base_m.compute_normals(auto_orient_normals=True)
         else:
             base_m = self._make_procedural_base()
-        self.actors.append(self.plotter.add_mesh(base_m, color="#25282e", specular=0.3, specular_power=15, smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(base_m, color="#facc15", specular=0.4, specular_power=20, smooth_shading=True))
 
-        # 2. Link 1 (Turntable top plate sitting at Z = 100 on top of base)
+        # 2. Link 1 (Turntable top plate sitting at Z = 100 on top of base) - Yellow PLA
         l1_f = MODELS_DIR / "link1.stl"
         if l1_f.is_file():
             l1_m = pv.read(str(l1_f))
@@ -137,9 +156,9 @@ class ArmVisualizer3D(QWidget):
             l1_m = l1_m.compute_normals(auto_orient_normals=True)
         else:
             l1_m = self._make_procedural_link1()
-        self.actors.append(self.plotter.add_mesh(l1_m, color="#374151", specular=0.4, specular_power=20, smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l1_m, color="#eab308", specular=0.4, specular_power=20, smooth_shading=True))
 
-        # 3. Link 2 (Upper Arm - arm1.stl): Industrial high-vis cyan
+        # 3. Link 2 (Upper Arm - arm1.stl): Vibrant PLA green - matches real robot
         l2_f = MODELS_DIR / "link2.stl"
         if l2_f.is_file():
             l2_m = pv.read(str(l2_f))
@@ -149,9 +168,9 @@ class ArmVisualizer3D(QWidget):
             l2_m = l2_m.compute_normals(auto_orient_normals=True)
         else:
             l2_m = self._make_procedural_link2()
-        self.actors.append(self.plotter.add_mesh(l2_m, color="#0284c7", specular=0.45, specular_power=25, smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l2_m, color="#22c55e", specular=0.45, specular_power=25, smooth_shading=True))
 
-        # 4. Link 3 (Forearm - arm1.stl): Precision silver-white
+        # 4. Link 3 (Forearm - arm1.stl): Matte black PLA - matches real robot
         l3_f = MODELS_DIR / "link3.stl"
         if not l3_f.is_file() and l2_f.is_file():
             l3_f = l2_f
@@ -163,9 +182,9 @@ class ArmVisualizer3D(QWidget):
             l3_m = l3_m.compute_normals(auto_orient_normals=True)
         else:
             l3_m = self._make_procedural_link3()
-        self.actors.append(self.plotter.add_mesh(l3_m, color="#e2e8f0", specular=0.45, specular_power=20, smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l3_m, color="#1e293b", specular=0.35, specular_power=15, smooth_shading=True))
 
-        # 5. Link 4 (Ranne - ranne.stl): Industrial orange safety accent
+        # 5. Link 4 (Ranne - ranne.stl): Matte black PLA - matches real robot
         l4_f = MODELS_DIR / "link4.stl"
         if l4_f.is_file():
             l4_m = pv.read(str(l4_f))
@@ -174,7 +193,7 @@ class ArmVisualizer3D(QWidget):
             l4_m = l4_m.compute_normals(auto_orient_normals=True)
         else:
             l4_m = self._make_procedural_link4()
-        self.actors.append(self.plotter.add_mesh(l4_m, color="#ea580c", specular=0.4, specular_power=20, smooth_shading=True))
+        self.actors.append(self.plotter.add_mesh(l4_m, color="#1e293b", specular=0.35, specular_power=15, smooth_shading=True))
 
         # 6. Gripper Assembly (Tarttuja.stl - contains mount flange, servo, and animated claws)
         grip_f = MODELS_DIR / "gripper.stl"
@@ -200,12 +219,12 @@ class ArmVisualizer3D(QWidget):
                 else:
                     base_poly = base_poly + b
 
-            self.gripper_base_actor = self.plotter.add_mesh(base_poly, color="#334155", specular=0.4, smooth_shading=True)
-            self.gripper_left_actor = self.plotter.add_mesh(left_poly, color="#94a3b8", specular=0.6, specular_power=30, smooth_shading=True)
-            self.gripper_right_actor = self.plotter.add_mesh(right_poly, color="#94a3b8", specular=0.6, specular_power=30, smooth_shading=True)
+            self.gripper_base_actor = self.plotter.add_mesh(base_poly, color="#0f172a", specular=0.4, smooth_shading=True)
+            self.gripper_left_actor = self.plotter.add_mesh(left_poly, color="#22c55e", specular=0.5, specular_power=25, smooth_shading=True)
+            self.gripper_right_actor = self.plotter.add_mesh(right_poly, color="#22c55e", specular=0.5, specular_power=25, smooth_shading=True)
         else:
             grip_m = self._make_procedural_gripper()
-            self.gripper_base_actor = self.plotter.add_mesh(grip_m, color="#94a3b8", smooth_shading=True)
+            self.gripper_base_actor = self.plotter.add_mesh(grip_m, color="#22c55e", smooth_shading=True)
 
         # TCP Coordinate Indicator Sphere
         tcp_sphere = pv.Sphere(radius=6, center=(0, 0, 0))
@@ -408,8 +427,8 @@ class ArmVisualizer3D(QWidget):
             open_offset = 14.0
             if joint_angles and len(joint_angles) >= 6:
                 j6 = float(joint_angles[5])
-                # 40 deg = fully open (~44mm tip gap), 128 deg = tightly closed (~0mm tip gap)
-                progress = max(0.0, min(1.0, (j6 - 40.0) / (128.0 - 40.0)))
+                # 20 deg = fully open (~44mm tip gap), 180 deg = tightly closed (~0mm tip gap)
+                progress = max(0.0, min(1.0, (j6 - 20.0) / (180.0 - 20.0)))
                 # Model default tip gap is 11.68mm. Offset -5.8mm closes it; +16.0mm opens it wide.
                 open_offset = (1.0 - progress) * 21.8 - 5.8
 
@@ -945,7 +964,7 @@ class ArmVisualizer3D(QWidget):
             return
         self._last_collision_state = is_collision
 
-        orig_colors = ["#25282e", "#374151", "#0284c7", "#e2e8f0", "#ea580c"]
+        orig_colors = ["#facc15", "#eab308", "#22c55e", "#1e293b", "#1e293b"]
         for i, act in enumerate(self.actors):
             if hasattr(act, "prop"):
                 try:

@@ -175,7 +175,7 @@ class RobotKinematics:
                            z: float,
                            pitch_deg: float = 0.0,
                            roll_deg: float = 90.0,
-                           gripper_deg: float = 40.0,
+                           gripper_deg: float = 20.0,
                            auto_adjust_pitch: bool = True,
                            current_angles: Optional[List[int]] = None) -> Optional[List[int]]:
         """
@@ -297,7 +297,7 @@ class RobotKinematics:
         s3 = int(round(90.0 + math.degrees(th3)))
         s4 = int(round(90.0 + math.degrees(th4)))
         s5 = int(round(max(0.0, min(180.0, roll_deg))))
-        s6 = int(round(max(40.0, min(128.0, gripper_deg))))
+        s6 = int(round(max(20.0, min(180.0, gripper_deg))))
 
         sol = [s1, s2, s3, s4, s5, s6]
 
@@ -346,10 +346,11 @@ class RobotKinematics:
         cur_x, cur_y, cur_z = pose.tcp_x, pose.tcp_y, pose.tcp_z
         pitch = preferred_pitch if preferred_pitch is not None else pose.pitch_deg
         roll = float(current_angles[4]) if len(current_angles) > 4 else 90.0
-        grip = float(current_angles[5]) if len(current_angles) > 5 else 40.0
+        grip = float(current_angles[5]) if len(current_angles) > 5 else 20.0
 
-        # Safe Z floor limit (table height protection)
-        safe_z = max(5.0, float(z))
+        # Safe Z floor limit (table height protection over the wooden board)
+        is_over_board = (-85.0 <= float(x) <= 515.0) and (-85.0 <= float(y) <= 415.0)
+        safe_z = max(5.0, float(z)) if is_over_board else float(z)
         target_x = float(x)
         target_y = float(y)
 
@@ -417,8 +418,8 @@ class RobotKinematics:
 
         roll_start = float(start_angles[4]) if len(start_angles) > 4 else 90.0
         roll_end = float(target_angles[4]) if len(target_angles) > 4 else 90.0
-        grip_start = float(start_angles[5]) if len(start_angles) > 5 else 40.0
-        grip_end = float(target_angles[5]) if len(target_angles) > 5 else 40.0
+        grip_start = float(start_angles[5]) if len(start_angles) > 5 else 20.0
+        grip_end = float(target_angles[5]) if len(target_angles) > 5 else 20.0
 
         for i in range(steps + 1):
             t = i / float(steps)
@@ -457,16 +458,19 @@ class RobotKinematics:
         3. Workpiece collision (Body links penetrating workpiece bounding box).
         Returns (has_collision, description).
         """
-        # 1. Floor collision check
-        # Check TCP and all joint origins
+        # 1. Floor collision check (over wooden work board: X in [-85, 515], Y in [-85, 415])
+        # Allows arm to articulate freely behind or beside the base without false table collisions
         for i, m in enumerate(pose.link_matrices):
+            pos_x = float(m[0, 3])
+            pos_y = float(m[1, 3])
             pos_z = float(m[2, 3])
-            # Links 2..7 must remain above table floor Z=0
-            if i >= 2 and pos_z < 0.0:
+            is_over_board = (-85.0 <= pos_x <= 515.0) and (-85.0 <= pos_y <= 415.0)
+            if is_over_board and i >= 2 and pos_z < 0.0:
                 link_name = f"Link {i}" if i < 4 else ("Ranne" if i == 4 else "Gripper")
                 return True, f"Törmäys työpöytään ({link_name} Z={pos_z:.1f} mm < 0 mm)"
 
-        if pose.tcp_z < 0.0:
+        is_tcp_over_board = (-85.0 <= pose.tcp_x <= 515.0) and (-85.0 <= pose.tcp_y <= 415.0)
+        if is_tcp_over_board and pose.tcp_z < 0.0:
             return True, f"TCP törmää työpöytään (Z={pose.tcp_z:.1f} mm < 0 mm)"
 
         # 2. Self-collision check (folded configurations)

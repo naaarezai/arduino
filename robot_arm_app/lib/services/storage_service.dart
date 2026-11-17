@@ -8,12 +8,12 @@ class StorageService {
   static const String _keyInversions = 'arm_servo_inversions';
 
   /// Lataa servojen suuntakäännöt (true = käännetty, 180 - kulma)
-  /// Oletuksena Servo 2 (Olkavarsi) on käännetty käyttäjän ilmoituksen perusteella.
+  /// Oletuksena Servot 2, 3 ja 4 (Olkavarsi, Kyynärvarsi, Ranne) ovat käännettyjä fyysisen robotin mukaan.
   static Future<List<bool>> loadInversions() async {
     final prefs = await SharedPreferences.getInstance();
     final list = prefs.getStringList(_keyInversions);
     if (list == null || list.length < 6) {
-      return [false, true, false, false, false, false];
+      return [false, true, true, true, false, false];
     }
     return list.map((e) => e == 'true').toList();
   }
@@ -35,10 +35,10 @@ class StorageService {
     try {
       final List decoded = jsonDecode(jsonStr);
       final list = decoded.map((e) => ArmPreset.fromJson(e)).toList();
-      // Varmistetaan että mekaaninen rajoitus 40-128° pätee myös aiemmin tallennettuihin
+      // Varmistetaan että mekaaninen rajoitus 20-180° pätee myös aiemmin tallennettuihin
       for (var p in list) {
         if (p.angles.length >= 6) {
-          p.angles[5] = p.angles[5].clamp(40, 128);
+          p.angles[5] = p.angles[5].clamp(20, 180);
         }
       }
       return list;
@@ -62,10 +62,10 @@ class StorageService {
     try {
       final List decoded = jsonDecode(jsonStr);
       final list = decoded.map((e) => SequenceStep.fromJson(e)).toList();
-      // Varmistetaan että mekaaninen rajoitus 40-128° pätee myös aiemmin tallennettuihin
+      // Varmistetaan että mekaaninen rajoitus 20-180° pätee myös aiemmin tallennettuihin
       for (var s in list) {
         if (s.angles.length >= 6) {
-          s.angles[5] = s.angles[5].clamp(40, 128);
+          s.angles[5] = s.angles[5].clamp(20, 180);
         }
       }
       return list;
@@ -85,37 +85,37 @@ class StorageService {
       ArmPreset(
         id: 'home',
         name: 'Lepoasento (Home)',
-        angles: [90, 90, 90, 90, 90, 40],
+        angles: [90, 90, 90, 90, 90, 20],
       ),
       ArmPreset(
         id: 'ready',
         name: 'Valmiustila (Ready)',
-        angles: [90, 110, 70, 90, 90, 50],
+        angles: [90, 110, 70, 90, 90, 40],
       ),
       ArmPreset(
         id: 'pick_low',
         name: 'Poiminta lattialta',
-        angles: [90, 140, 40, 110, 90, 40],
+        angles: [90, 140, 40, 110, 90, 20],
       ),
       ArmPreset(
         id: 'lift_high',
         name: 'Nosto ylös',
-        angles: [90, 70, 110, 90, 90, 128],
+        angles: [90, 70, 110, 90, 90, 180],
       ),
       ArmPreset(
         id: 'reach_forward',
         name: 'Kurotus eteen',
-        angles: [90, 130, 90, 90, 90, 84],
+        angles: [90, 130, 90, 90, 90, 100],
       ),
       ArmPreset(
         id: 'box_left',
         name: 'Kääntö vasemmalle',
-        angles: [30, 90, 90, 90, 90, 40],
+        angles: [30, 90, 90, 90, 90, 20],
       ),
       ArmPreset(
         id: 'box_right',
         name: 'Kääntö oikealle',
-        angles: [150, 90, 90, 90, 90, 40],
+        angles: [150, 90, 90, 90, 90, 20],
       ),
     ];
   }
@@ -125,43 +125,43 @@ class StorageService {
       SequenceStep(
         id: 'step_1',
         name: '1. Aloitus: Lepoasento',
-        angles: [90, 90, 90, 90, 90, 40],
+        angles: [90, 90, 90, 90, 90, 20],
         delayMs: 1500,
       ),
       SequenceStep(
         id: 'step_2',
         name: '2. Laskeudu alas (Koura auki)',
-        angles: [90, 135, 45, 100, 90, 40],
+        angles: [90, 135, 45, 100, 90, 20],
         delayMs: 1500,
       ),
       SequenceStep(
         id: 'step_3',
         name: '3. Tartu kappaleeseen (Sulje koura)',
-        angles: [90, 135, 45, 100, 90, 128],
+        angles: [90, 135, 45, 100, 90, 180],
         delayMs: 1200,
       ),
       SequenceStep(
         id: 'step_4',
         name: '4. Nosta ilmaan',
-        angles: [90, 80, 100, 90, 90, 128],
+        angles: [90, 80, 100, 90, 90, 180],
         delayMs: 1500,
       ),
       SequenceStep(
         id: 'step_5',
         name: '5. Käännä oikealle',
-        angles: [150, 80, 100, 90, 90, 128],
+        angles: [150, 80, 100, 90, 90, 180],
         delayMs: 1500,
       ),
       SequenceStep(
         id: 'step_6',
         name: '6. Laskeudu ja vapauta kappale',
-        angles: [150, 135, 45, 100, 90, 40],
+        angles: [150, 135, 45, 100, 90, 20],
         delayMs: 1500,
       ),
       SequenceStep(
         id: 'step_7',
         name: '7. Palaa kotiin',
-        angles: [90, 90, 90, 90, 90, 40],
+        angles: [90, 90, 90, 90, 90, 20],
         delayMs: 1500,
       ),
     ];

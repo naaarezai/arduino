@@ -244,9 +244,9 @@ class _ArmKinematicsPainter extends CustomPainter {
     _drawJoint(canvas, j2, "S2:Kyynär", Colors.lightBlue);
     _drawJoint(canvas, j3, "S3:Ranne", Colors.orange);
 
-    // Piirretään koura (Gripper 40° = auki, 128° = kiinni)
-    final clampedGripper = gripper.clamp(40.0, 128.0);
-    final clawProgress = (clampedGripper - 40.0) / (128.0 - 40.0);
+    // Piirretään koura (Gripper 20° = auki, 180° = kiinni)
+    final clampedGripper = gripper.clamp(20.0, 180.0);
+    final clawProgress = (clampedGripper - 20.0) / (180.0 - 20.0);
     final clawAngleOffset = (1.0 - clawProgress) * 0.42 + 0.12;
 
     final claw1End = Offset(

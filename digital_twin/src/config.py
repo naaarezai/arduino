@@ -18,6 +18,12 @@ SERIAL_THROTTLE_MS: int = 35  # ~28 Hz update rate to prevent serial buffer over
 PACKET_HEADER: str = "<"
 PACKET_FOOTER: str = ">\n"
 
+# Bluetooth Low Energy (BLE) Communication Settings (Matches Arduino Uno R4 WiFi firmware)
+BLE_DEVICE_NAME: str = "Arduino-Arm"
+BLE_SERVICE_UUID: str = "19B10000-E8F2-537E-4F6C-D104768A1214"
+BLE_CHARACTERISTIC_UUID: str = "19B10001-E8F2-537E-4F6C-D104768A1214"
+BLE_THROTTLE_MS: int = 45  # ~22 Hz update rate matching BLE mobile control
+
 # Kinematic Link Dimensions (in millimeters) - Calibrated to Inventor CAD models
 LINK_0_HEIGHT: float = 140.0  # Base height to Shoulder joint (J2)
 LINK_1_LENGTH: float = 199.5  # Shoulder to Elbow (J3) - arm1.stl pivot-to-pivot distance
@@ -35,18 +41,18 @@ JOINT_NAMES = [
 ]
 
 # Physical angles limits (min, max) in degrees
-# Note: Servo 6 is constrained to 40° - 128° to prevent mechanical binding!
+# Note: Servo 6 is constrained to 20° - 180° (below 20° gears disengage mechanically)
 JOINT_LIMITS: List[Tuple[int, int]] = [
     (0, 180),   # J1
     (0, 180),   # J2
     (0, 180),   # J3
     (0, 180),   # J4
     (0, 180),   # J5
-    (40, 128),  # J6 (Gripper safety boundary)
+    (20, 180),  # J6 (Gripper safety boundary)
 ]
 
 # Default Home Angles
-DEFAULT_HOME_ANGLES: List[int] = [90, 90, 90, 90, 90, 40]
+DEFAULT_HOME_ANGLES: List[int] = [90, 90, 90, 90, 90, 20]
 
 # STL model filenames mapping
 STL_FILES = {

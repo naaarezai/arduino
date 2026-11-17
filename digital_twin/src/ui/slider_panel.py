@@ -89,7 +89,7 @@ class SliderPanel(QGroupBox):
             chk_inv = QCheckBox("Inv")
             chk_inv.setToolTip(f"Käännä servon {i+1} pyörimissuunta (180 - kulma)")
             chk_inv.setStyleSheet("color: #90a4ae; font-size: 11px;")
-            if i == 1:  # Shoulder is inverted by default to match arm mechanics
+            if i in (1, 2, 3):  # Servos 2, 3, 4 (Shoulder, Elbow, Wrist Pitch) inverted to match physical robot
                 chk_inv.setChecked(True)
 
             # Store references
@@ -116,10 +116,10 @@ class SliderPanel(QGroupBox):
         presets_layout.setContentsMargins(4, 8, 4, 8)
 
         presets = [
-            ("🏠 Koti (Home)", [90, 90, 90, 90, 90, 40]),
-            ("⚡ Valmis (Ready)", [90, 60, 120, 90, 90, 40]),
+            ("🏠 Koti (Home)", [90, 90, 90, 90, 90, 20]),
+            ("⚡ Valmis (Ready)", [90, 60, 120, 90, 90, 20]),
             ("🎯 Kurotus", [90, 45, 45, 90, 90, 100]),
-            ("📦 Poiminta", [90, 110, 130, 40, 90, 128]),
+            ("📦 Poiminta", [90, 110, 130, 40, 90, 180]),
         ]
 
         for title, angles in presets:

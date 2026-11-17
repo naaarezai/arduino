@@ -7,7 +7,7 @@ void main() {
   );
 
   test('FK calculates home pose correctly', () {
-    final pose = kinematics.forwardKinematics([90, 90, 90, 90, 90, 40]);
+    final pose = kinematics.forwardKinematics([90, 90, 90, 90, 90, 20]);
     expect(pose.x.abs() < 1.0, isTrue);
     expect(pose.y.abs() < 1.0, isTrue);
     expect((pose.z - 720.0).abs() < 1.0, isTrue);
@@ -15,7 +15,7 @@ void main() {
   });
 
   test('IK can solve realistic picking pose', () {
-    final target = const CartesianPose(x: 200, y: 0, z: 250, pitch: -60, roll: 90, gripper: 40);
+    final target = const CartesianPose(x: 200, y: 0, z: 250, pitch: -60, roll: 90, gripper: 20);
     final angles = kinematics.inverseKinematics(target);
     expect(angles, isNotNull);
 
@@ -23,7 +23,7 @@ void main() {
     expect((fk.x - target.x).abs() < 3.0, isTrue);
     expect((fk.y - target.y).abs() < 3.0, isTrue);
     expect((fk.z - target.z).abs() < 3.0, isTrue);
-    expect(angles[5] >= 40 && angles[5] <= 128, isTrue);
+    expect(angles[5] >= 20 && angles[5] <= 180, isTrue);
   });
 
   test('Linear path generator produces multiple steps', () {

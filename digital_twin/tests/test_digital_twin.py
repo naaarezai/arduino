@@ -102,10 +102,14 @@ class TestCalibrationManager(unittest.TestCase):
         phys = cm.to_physical([90, 100, 90, 90, 90, 40])
         self.assertEqual(phys[1], 85)
 
-        # Clamping J6 (Servo 6) to safe boundary [40, 128]
+        # Clamping J6 (Servo 6) to boundary [20, 180]
         cm.set_offset(5, 50)
-        phys_clamped = cm.to_physical([90, 90, 90, 90, 90, 120])
-        self.assertEqual(phys_clamped[5], 128)
+        phys_clamped = cm.to_physical([90, 90, 90, 90, 90, 150])
+        self.assertEqual(phys_clamped[5], 180)
+
+        cm.set_offset(5, -20)
+        phys_low = cm.to_physical([90, 90, 90, 90, 90, 15])
+        self.assertEqual(phys_low[5], 20)
 
 
 class TestPostProcessor(unittest.TestCase):
@@ -205,7 +209,7 @@ class TestWorkpieceAndWelding(unittest.TestCase):
         # All joints must obey physical hardware limits
         for sol in (sol_app, sol_start, sol_end, sol_retract):
             self.assertTrue(all(0 <= sol[i] <= 180 for i in range(5)))
-            self.assertTrue(40 <= sol[5] <= 128)
+            self.assertTrue(20 <= sol[5] <= 180)
 
         # Build full 5-step program with Welding Torch
         self.kin.set_active_tool(TOOL_PRESETS["WELDING_TORCH"])
@@ -253,6 +257,30 @@ class TestUXAndSafety(unittest.TestCase):
             self.assertIn("device", p)
             self.assertIn("description", p)
             self.assertIn("is_arduino", p)
+
+    def test_ble_worker_emergency_stop(self):
+        from src.communication.ble_worker import BleWorker
+        worker = BleWorker()
+        worker.send_angles([90, 100, 110, 90, 90, 40])
+        self.assertEqual(worker._pending_angles, [90, 100, 110, 90, 90, 40])
+        worker.emergency_stop()
+        self.assertIsNone(worker._pending_angles, "BLE Emergency stop must immediately flush pending queue")
+
+    def test_ble_packet_building_and_limits(self):
+        from src.communication.ble_worker import BleWorker
+        # Servo 6 must be clamped strictly to [20, 180] and J1..J5 to [0, 180]
+        pkt = BleWorker.build_angle_packet([-10, 200, 90, 45, 135, 210])
+        self.assertEqual(len(pkt), 6)
+        self.assertEqual(list(pkt), [0, 180, 90, 45, 135, 180])
+
+        pkt_low = BleWorker.build_angle_packet([10, 20, 30, 40, 50, 5])
+        self.assertEqual(list(pkt_low), [10, 20, 30, 40, 50, 20])
+
+    def test_ble_config_matches_arduino_firmware(self):
+        from src.config import BLE_CHARACTERISTIC_UUID, BLE_DEVICE_NAME, BLE_SERVICE_UUID
+        self.assertEqual(BLE_DEVICE_NAME, "Arduino-Arm")
+        self.assertEqual(BLE_SERVICE_UUID, "19B10000-E8F2-537E-4F6C-D104768A1214")
+        self.assertEqual(BLE_CHARACTERISTIC_UUID, "19B10001-E8F2-537E-4F6C-D104768A1214")
 
 
 class TestWeldPlanner(unittest.TestCase):

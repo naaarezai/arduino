@@ -401,7 +401,7 @@ class PickAndPlaceDialog(QDialog):
         self.result_statements.append(("LIN", sol_pick, 40, "Laskeutuminen kappaleeseen (Pick)"))
         # Step 3: Grip / Vacuum ON
         if self.tool_type == "GRIPPER":
-            self.result_statements.append(("GRIPPER", "CLOSE", 128, "Tartu kappaleeseen (Koura kiinni)"))
+            self.result_statements.append(("GRIPPER", "CLOSE", 180, "Tartu kappaleeseen (Koura kiinni)"))
         else:
             self.result_statements.append(("TOOL_ACTION", "VACUUM", "ON", "Imu PÄÄLLE (Tyhjiö aktivoitu)"))
         # Step 4: Dwell
@@ -414,7 +414,7 @@ class PickAndPlaceDialog(QDialog):
         self.result_statements.append(("LIN", sol_place, 40, "Lasku asennuspintaan (Place)"))
         # Step 8: Release / Vacuum OFF
         if self.tool_type == "GRIPPER":
-            self.result_statements.append(("GRIPPER", "OPEN", 40, "Päästä kappale (Koura auki)"))
+            self.result_statements.append(("GRIPPER", "OPEN", 20, "Päästä kappale (Koura auki)"))
         else:
             self.result_statements.append(("TOOL_ACTION", "VACUUM", "OFF", "Imu POIS (Kappaleen vapautus)"))
         # Step 9: Dwell
@@ -585,8 +585,8 @@ class StatementTreePanel(QGroupBox):
             }
             QPushButton:hover { background: #059669; }
         """)
-        self.btn_grip_close.setToolTip("Sulje koura (Ote kappaleesta, J6=128°)")
-        self.btn_grip_close.clicked.connect(lambda: self._add_gripper_fixed("CLOSE", 128))
+        self.btn_grip_close.setToolTip("Sulje koura (Ote kappaleesta, J6=180°)")
+        self.btn_grip_close.clicked.connect(lambda: self._add_gripper_fixed("CLOSE", 180))
         grip_l.addWidget(self.btn_grip_close)
 
         self.btn_grip_open = QPushButton("🖐️ Päästä (Open)")
@@ -597,8 +597,8 @@ class StatementTreePanel(QGroupBox):
             }
             QPushButton:hover { background: #0284c7; color: white; }
         """)
-        self.btn_grip_open.setToolTip("Avaa koura (Päästä kappale, J6=40°)")
-        self.btn_grip_open.clicked.connect(lambda: self._add_gripper_fixed("OPEN", 40))
+        self.btn_grip_open.setToolTip("Avaa koura (Päästä kappale, J6=20°)")
+        self.btn_grip_open.clicked.connect(lambda: self._add_gripper_fixed("OPEN", 20))
         grip_l.addWidget(self.btn_grip_open)
 
         self.btn_grip_custom = QPushButton("📐 Leukaväli...")
@@ -949,9 +949,9 @@ class StatementTreePanel(QGroupBox):
     def _add_gripper_action(self) -> None:
         self._push_undo()
         angles = self.get_current_angles()
-        cur_j6 = angles[5] if len(angles) >= 6 else 40
-        action = "OPEN" if cur_j6 > 84 else "CLOSE"
-        target_angle = 40 if action == "OPEN" else 128
+        cur_j6 = angles[5] if len(angles) >= 6 else 20
+        action = "OPEN" if cur_j6 > 100 else "CLOSE"
+        target_angle = 20 if action == "OPEN" else 180
         self.program.add_gripper(action=action, target_angle=target_angle)
         self.refresh_tree()
 
@@ -1042,7 +1042,7 @@ class StatementTreePanel(QGroupBox):
                     stmt.duration_ms = val
                     self.refresh_tree()
             elif isinstance(stmt, GripperStatement):
-                val, ok = QInputDialog.getInt(self, "Muokkaa kourakulmaa", "Kouran asento (40°=auki, 128°=kiinni):", stmt.target_angle, 40, 128)
+                val, ok = QInputDialog.getInt(self, "Muokkaa kourakulmaa", "Kouran asento (20°=auki, 180°=kiinni):", stmt.target_angle, 20, 180)
                 if ok:
                     stmt.target_angle = val
                     self.refresh_tree()

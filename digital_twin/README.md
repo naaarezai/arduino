@@ -27,7 +27,7 @@ python main.py
 Yläpalkin välilehdistä voit siirtyä eri suunnitteluvaiheiden välillä:
 * **📋 Program (OLP):** Päätila robottiohjelman opettamiseen, liikeratapuun muokkaukseen ja dynaamisten työkalutoimintojen käyttöön.
 * **▶️ Simulation:** Simulaation toisto, nopeuskertoimet (0.5x, 1x, 2x, 4x), aikajana ja sykliaikalaskuri.
-* **🔌 Layout & Connections:** Sarjaporttiyhteys (USB 115200 baud), servojen kalibrointi ja laiteyhteyden hallinta.
+* **🔌 Layout & Connections:** Sarjaporttiyhteys (USB 115200 baud) sekä langaton **Bluetooth Low Energy (BLE)** -ohjaus (`Arduino-Arm`), servojen kalibrointi ja laiteyhteyden hallinta.
 
 ---
 
@@ -110,6 +110,13 @@ Pikanäppäimet: **`Ctrl + Shift + S`** (Tallenna) ja **`Ctrl + Shift + O`** (Av
 
 ---
 
+### 8. 📐 Servojen suunnanvaihdot (Inversions) ja työpöydän mitoitus
+* **Servojen mekaaniset inversiot:** Servot J2 (Olkapää), J3 (Kyynärpää) ja J4 (Ranne pysty) ovat oletuksena käännettyjä (`Inv = True`), jotta ohjelmiston liikesuunnat vastaavat 1:1 fyysisen robotin mekaanista vivustoa.
+* **Kalibrointiprofiili (`calibration.json`):** Servokohtaiset nollapisteen trimmit (offset) ja inversiot ladataan automaattisesti käynnistyksen yhteydessä.
+* **Työpöytäsolun mitoitus:** Robotin keltainen jalusta on asennettu takavasempaan kulmaan mäntylankkupöytää ($X: -85\dots 515\,\text{mm}, Y: -85\dots 415\,\text{mm}$), jolloin kinemaattinen törmäystarkastelu kattaa koko fyysisen työskentelyalueen.
+
+---
+
 ## ⌨️ Pikanäppäimet (Keyboard Shortcuts)
 
 | Pikanäppäin | Toiminto |
@@ -117,7 +124,7 @@ Pikanäppäimet: **`Ctrl + Shift + S`** (Tallenna) ja **`Ctrl + Shift + O`** (Av
 | **`Space`** | Simulaation käynnistys / pysäytys (Play / Pause) |
 | **`Esc`** | **⛔ HÄTÄ-SEIS (E-STOP)** — pysäyttää välittömästi kaiken liikkeen ja sarjaliikenteen |
 | **`Ctrl + T`** | Avaa työkalu- ja TCP-hallintadialogin |
-| **`Ctrl + H`** | Aja robotti koti-asentoon (Home Pose: 90°, 90°, 90°, 90°, 90°, 40°) |
+| **`Ctrl + H`** | Aja robotti koti-asentoon (Home Pose: 90°, 90°, 90°, 90°, 90°, 20°) |
 | **`Ctrl + Shift + S`** | Tallenna koko työtilaprojekti (`.project.json`) |
 | **`Ctrl + Shift + O`** | Avaa aiemmin tallennettu työtilaprojekti |
 | **`Ctrl + S`** | Tallenna OLP-ohjelma JSON-tiedostoon |
@@ -132,7 +139,7 @@ Pikanäppäimet: **`Ctrl + Shift + S`** (Tallenna) ja **`Ctrl + Shift + O`** (Av
 
 Sovellus sisältää valmiit teollisuustyökalut tarkasti lasketuilla TCP-offseteillä:
 
-1. **2-Leukakoura (Standard Gripper):** TCP Z=+99.3 mm, leukakulma 40° (auki) – 128° (kiinni).
+1. **2-Leukakoura (Standard Gripper):** TCP Z=+99.3 mm, leukakulma 20° (auki) – 180° (kiinni).
 2. **Hitsauspoltin (MIG/MAG Torch 45°):** TCP X=+35.0 mm, Z=+135.0 mm, kallistus 45.0°.
 3. **Annostelusuutin / Liimakynä (Dispenser):** TCP Z=+115.0 mm.
 4. **Imukuppitarttuja (Vacuum Gripper):** TCP Z=+65.0 mm.
@@ -146,7 +153,7 @@ Sovellukseen on tehty laaja teollisuusluokan suorituskykyoptimointi:
 * **Yksivaiheinen GPU-renderöinti:** Poistettu turhat tuplarenderöinnit, jolloin 3D-näkymä toimii vakaasti 60 FPS:llä.
 * **FXAA (Fast Approximate Anti-Aliasing):** Sahalaitojen poisto ilman GPU-kuormitusta.
 * **CSS-välimuisti:** Qt-tyylimäärittelyt päivittyvät vain tilan vaihtuessa, mikä vapauttaa CPU-resursseja.
-* **Turvallinen sarjaliikenne:** Taustasäie (`QThread`) hoitaa USB-tiedonsiirron Arduinolle 30 Hz kuristuksella ilman käyttöliittymän nykimistä.
+* **Turvallinen laiteyhteys (USB & BLE):** Erilliset taustasäikeet (`QThread`) hoitavat sekä USB-sarjaliikenteen (`pySerial`) että langattoman Bluetooth Low Energy -tiedonsiirron (`bleak`) Arduinolle kuristetulla taajuudella ilman käyttöliittymän nykimistä.
 
 ---
 
@@ -159,7 +166,8 @@ digital_twin/
 ├── src/
 │   ├── config.py             # Mitat, servorajat, baudinopeus ja asetukset
 │   ├── communication/
-│   │   └── serial_worker.py  # Säieturvallinen QThread pySerial -kommunikaattori
+│   │   ├── serial_worker.py  # Säieturvallinen QThread pySerial -kommunikaattori (USB)
+│   │   └── ble_worker.py     # Säieturvallinen QThread bleak -kommunikaattori & skanneri (BLE)
 │   ├── core/
 │   │   ├── kinematics.py     # 6-DOF matriisikinematiikka, FK, IK ja törmäystarkistus
 │   │   ├── program.py        # OLP-ohjelmamalli (PTP, LIN, Gripper, ToolAction, Delay)
@@ -181,7 +189,7 @@ digital_twin/
 │       ├── calibration_dialog.py # Servojen fyysinen kalibrointi
 │       └── qt_compat.py      # PyQt6 / PyQt5 -yhteensopivuuskerros
 ├── tests/
-│   └── test_digital_twin.py  # Kattavat yksikkö- ja integraatiotestit (20 testiä)
+│   └── test_digital_twin.py  # Kattavat yksikkö- ja integraatiotestit (23 testiä)
 ├── main.py                   # Sovelluksen pääkäynnistystiedosto
 ├── requirements.txt          # Python-riippuvuudet
 └── README.md                 # Tämä käyttö- ja kehittäjädokumentaatio
@@ -196,4 +204,4 @@ Aja kattavat yksikkö- ja kinematiikkatestit komentoriviltä:
 $env:PYTHONPATH="digital_twin"
 python -m unittest discover -s digital_twin/tests -p "test_*.py"
 ```
-Kaikki 20 testiä suoritetaan automaattisesti alle 0.15 sekunnissa.
+Kaikki 23 testiä suoritetaan automaattisesti alle 0.5 sekunnissa.
