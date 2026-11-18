@@ -49,13 +49,19 @@ const int minAngles[NUM_SERVOS] = {0, 0, 0, 0, 0, 20};
 const int maxAngles[NUM_SERVOS] = {180, 180, 180, 180, 180, 180};
 
 // ========================================================================
-// LIIKKEEN NOPEUDEN JA PEHMENNYKSEN SÄÄTÖ (SPEED & SMOOTHING)
+// PEHMEÄ S-CURVE / KIIHTYVYYS- JA JARRUTUSRAMPPI (SMOOTH ACCELERATION & BRAKING)
 // ========================================================================
-// speedStep: Kuinka monta astetta servo kääntyy yhdellä askeleella.
+// maxSpeed: Huippunopeus (astetta / askel). 0.35 astetta / 20 ms = 17.5 astetta / s
 //   - 0.20 - 0.35: Erittäin rauhallinen, tärinätön ja turvallinen (SUOSITELTU)
 //   - 0.50: Normaali teollisuusnopeus
-//   - 1.00: Nopea (alkuperäinen oletus, voi aiheuttaa heilumista ja tärinää)
-float speedStep = 0.35; // Oletus: 0.35 astetta / askel
+float maxSpeed = 0.35;
+
+// accelStep: Kiihtyvyys (kuinka nopeasti nopeus kasvaa/vähenee per askel).
+//   - Pienempi arvo = pehmeämpi ja tärinättömämpi liikkeellelähtö ja pysähdys!
+float accelStep = 0.015;
+
+// Hetkellinen nopeus kullekin 6 servolle (aloitetaan nollasta)
+float currentSpeeds[NUM_SERVOS] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
 // STEP_INTERVAL_MS: Päivitysväli millisekunteina (20 ms = 50 Hz servotaajuus)
 const unsigned long STEP_INTERVAL_MS = 20;
@@ -152,9 +158,10 @@ void checkSerialInput() {
         int spd;
         if (sscanf(serialBuf, "SPD:%d", &spd) == 1 || sscanf(serialBuf, "SPEED:%d", &spd) == 1) {
           spd = constrain(spd, 5, 100);
-          speedStep = (float)spd / 100.0f * 1.0f;
+          maxSpeed = (float)spd / 100.0f * 1.0f;
+          accelStep = maxSpeed * 0.04f;
           Serial.print("<SPD_OK:");
-          Serial.print(speedStep);
+          Serial.print(maxSpeed);
           Serial.println(">");
           return;
         }
@@ -240,35 +247,73 @@ void updateServoPositions() {
   }
   lastStepTime = now;
 
+  // 1. Etsitään suurin kulmaero nivelten välillä synkronoitua ajoa varten
+  float maxDist = 0.0;
+  for (int i = 0; i < NUM_SERVOS; i++) {
+    float d = abs(targetAngles[i] - currentAngles[i]);
+    if (d > maxDist) maxDist = d;
+  }
+
   bool movingNow = false;
 
   for (int i = 0; i < NUM_SERVOS; i++) {
-    if (abs(currentAngles[i] - targetAngles[i]) > 0.05) {
+    float diff = targetAngles[i] - currentAngles[i];
+    float dist = abs(diff);
+
+    if (dist > 0.08) {
       movingNow = true;
-      if (currentAngles[i] < targetAngles[i]) {
-        currentAngles[i] += speedStep;
-        if (currentAngles[i] > targetAngles[i])
-          currentAngles[i] = targetAngles[i];
-      } else {
-        currentAngles[i] -= speedStep;
-        if (currentAngles[i] < targetAngles[i])
-          currentAngles[i] = targetAngles[i];
+
+      // a) Synkronoitu huippunopeus: kaikki 6 niveltä saapuvat maaliin yhtä aikaa
+      float jointMaxSpd = maxSpeed;
+      if (maxDist > 0.1) {
+        jointMaxSpd = maxSpeed * (dist / maxDist);
+        if (jointMaxSpd < 0.04) jointMaxSpd = 0.04;
       }
+
+      // b) Pehmeä jarrutus (Deceleration ramp):
+      // Lähestyttäessä tavoitetta nopeus vaimenee nollaan ilman tärähdystä
+      float desiredSpeed = min(jointMaxSpd, dist * 0.07f);
+      if (desiredSpeed < 0.03f) desiredSpeed = 0.03f;
+
+      // c) Pehmeä kiihtyvyys ja hidastus (S-Curve kiihtyvyysrajoitus)
+      if (currentSpeeds[i] < desiredSpeed) {
+        currentSpeeds[i] += accelStep;
+        if (currentSpeeds[i] > desiredSpeed) currentSpeeds[i] = desiredSpeed;
+      } else if (currentSpeeds[i] > desiredSpeed) {
+        currentSpeeds[i] -= accelStep * 1.5f;
+        if (currentSpeeds[i] < desiredSpeed) currentSpeeds[i] = desiredSpeed;
+      }
+
+      // d) Päivitetään asento
+      if (diff > 0) {
+        currentAngles[i] += currentSpeeds[i];
+        if (currentAngles[i] > targetAngles[i]) {
+          currentAngles[i] = targetAngles[i];
+          currentSpeeds[i] = 0.0;
+        }
+      } else {
+        currentAngles[i] -= currentSpeeds[i];
+        if (currentAngles[i] < targetAngles[i]) {
+          currentAngles[i] = targetAngles[i];
+          currentSpeeds[i] = 0.0;
+        }
+      }
+
       servos[i].write((int)round(currentAngles[i]));
+    } else {
+      currentAngles[i] = targetAngles[i];
+      currentSpeeds[i] = 0.0;
     }
   }
 
   // Valojen ohjaus liikkeen mukaan
   if (movingNow) {
-    // Kun servot liikkuvat: sytytetään LED_BUILTIN ja näytetään liikesymboli
-    // matriisissa
     digitalWrite(LED_PIN, HIGH);
     if (!isMoving) {
       matrix.loadFrame(iconMoving);
       isMoving = true;
     }
   } else {
-    // Kun liike on pysähtynyt ja tavoiteasento saavutettu
     if (isMoving) {
       digitalWrite(LED_PIN, LOW);
       matrix.loadFrame(iconReady);
@@ -286,7 +331,8 @@ void parseTextCommand(const char *str) {
   int spd;
   if (sscanf(str, "SPD:%d", &spd) == 1 || sscanf(str, "SPEED:%d", &spd) == 1) {
     spd = constrain(spd, 5, 100);
-    speedStep = (float)spd / 100.0f * 1.0f;
+    maxSpeed = (float)spd / 100.0f * 1.0f;
+    accelStep = maxSpeed * 0.04f;
     return;
   }
 
