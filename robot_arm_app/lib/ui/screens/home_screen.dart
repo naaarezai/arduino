@@ -171,12 +171,12 @@ class _HomeScreenState extends State<HomeScreen>
       });
       _bleService.sendAnglesImmediate(_currentPhysicalAnglesInt);
     } else {
-      // LINEAR: Suora 3D-viiva avaruudessa väliaskeleilla
+      // LINEAR: Suora 3D-viiva avaruudessa tasaisilla ja rauhallisilla väliaskeleilla
       final startPose = _currentCartesianPose;
       final trajectory = _kinematics.generateLinearPath(
         start: startPose,
         target: target,
-        stepSizeMm: 6.0,
+        stepSizeMm: 3.0, // Rauhallisempi askelkoko (aiemmin 6.0 mm oli liian nopea)
       );
 
       if (trajectory.isEmpty) return;
@@ -185,7 +185,7 @@ class _HomeScreenState extends State<HomeScreen>
       int stepIdx = 0;
 
       _trajectoryTimer?.cancel();
-      _trajectoryTimer = Timer.periodic(const Duration(milliseconds: 35), (
+      _trajectoryTimer = Timer.periodic(const Duration(milliseconds: 40), (
         timer,
       ) {
         if (!mounted || stepIdx >= trajectory.length) {

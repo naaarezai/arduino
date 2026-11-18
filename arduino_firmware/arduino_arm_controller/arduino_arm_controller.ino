@@ -48,9 +48,17 @@ float targetAngles[NUM_SERVOS] = {90.0, 90.0, 90.0, 90.0, 90.0, 20.0};
 const int minAngles[NUM_SERVOS] = {0, 0, 0, 0, 0, 20};
 const int maxAngles[NUM_SERVOS] = {180, 180, 180, 180, 180, 180};
 
-// Liikkeen pehmennysnopeus (asteina per askel)
-const float SPEED_STEP = 1.0;
-const unsigned long STEP_INTERVAL_MS = 15; // Päivitysväli millisekunteina
+// ========================================================================
+// LIIKKEEN NOPEUDEN JA PEHMENNYKSEN SÄÄTÖ (SPEED & SMOOTHING)
+// ========================================================================
+// speedStep: Kuinka monta astetta servo kääntyy yhdellä askeleella.
+//   - 0.20 - 0.35: Erittäin rauhallinen, tärinätön ja turvallinen (SUOSITELTU)
+//   - 0.50: Normaali teollisuusnopeus
+//   - 1.00: Nopea (alkuperäinen oletus, voi aiheuttaa heilumista ja tärinää)
+float speedStep = 0.35; // Oletus: 0.35 astetta / askel
+
+// STEP_INTERVAL_MS: Päivitysväli millisekunteina (20 ms = 50 Hz servotaajuus)
+const unsigned long STEP_INTERVAL_MS = 20;
 unsigned long lastStepTime = 0;
 
 // BLE Palvelu ja Karakteristiikka
@@ -141,6 +149,16 @@ void checkSerialInput() {
         serialBuf[bufIndex] = '\0';
         receiving = false;
 
+        int spd;
+        if (sscanf(serialBuf, "SPD:%d", &spd) == 1 || sscanf(serialBuf, "SPEED:%d", &spd) == 1) {
+          spd = constrain(spd, 5, 100);
+          speedStep = (float)spd / 100.0f * 1.0f;
+          Serial.print("<SPD_OK:");
+          Serial.print(speedStep);
+          Serial.println(">");
+          return;
+        }
+
         int a0, a1, a2, a3, a4, a5;
         if (sscanf(serialBuf, "%d,%d,%d,%d,%d,%d", &a0, &a1, &a2, &a3, &a4,
                    &a5) == 6) {
@@ -228,11 +246,11 @@ void updateServoPositions() {
     if (abs(currentAngles[i] - targetAngles[i]) > 0.05) {
       movingNow = true;
       if (currentAngles[i] < targetAngles[i]) {
-        currentAngles[i] += SPEED_STEP;
+        currentAngles[i] += speedStep;
         if (currentAngles[i] > targetAngles[i])
           currentAngles[i] = targetAngles[i];
       } else {
-        currentAngles[i] -= SPEED_STEP;
+        currentAngles[i] -= speedStep;
         if (currentAngles[i] < targetAngles[i])
           currentAngles[i] = targetAngles[i];
       }
@@ -265,6 +283,13 @@ void updateServoPositions() {
 }
 
 void parseTextCommand(const char *str) {
+  int spd;
+  if (sscanf(str, "SPD:%d", &spd) == 1 || sscanf(str, "SPEED:%d", &spd) == 1) {
+    spd = constrain(spd, 5, 100);
+    speedStep = (float)spd / 100.0f * 1.0f;
+    return;
+  }
+
   int a0, a1, a2, a3, a4, a5;
   if (sscanf(str, "%d,%d,%d,%d,%d,%d", &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
     targetAngles[0] = constrain(a0, minAngles[0], maxAngles[0]);
