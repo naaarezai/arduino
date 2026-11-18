@@ -248,8 +248,10 @@ class RobotProgram:
                 )
 
                 if is_lin:
-                    # Cartesian straight line
-                    segment = self.kinematics.generate_linear_path(curr, target, step_size_mm=6.0)
+                    # Cartesian straight line - skaalataan askelkokoa nopeusprosentin mukaan
+                    speed_factor = max(0.05, min(2.0, stmt.speed_percent / 100.0))
+                    eff_step_mm = max(1.0, 6.0 * speed_factor)
+                    segment = self.kinematics.generate_linear_path(curr, target, step_size_mm=eff_step_mm)
                     for frame_angles in segment:
                         frames.append(TrajectoryFrame(
                             angles=frame_angles,

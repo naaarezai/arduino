@@ -1032,9 +1032,18 @@ class StatementTreePanel(QGroupBox):
             stmt = self.program.statements[idx]
             self._push_undo()
             if isinstance(stmt, MotionStatement):
-                val, ok = QInputDialog.getInt(self, "Muokkaa nopeutta", f"Nopeus (%) käskylle {stmt.target_id}:", stmt.speed_percent, 1, 100)
+                val, ok = QInputDialog.getInt(
+                    self,
+                    "Muokkaa nopeutta",
+                    f"Aseta nopeus (%) käskylle {stmt.target_id} (1 - 100%):\n(100% = 1500 ms, 50% = 3000 ms, 25% = 6000 ms, 10% = 15000 ms)",
+                    stmt.speed_percent,
+                    1,
+                    100
+                )
                 if ok:
                     stmt.speed_percent = val
+                    # Päivitetään kestoaika automaattisesti vastaamaan nopeutta (100% = 1500 ms)
+                    stmt.duration_ms = max(200, min(30000, int(round(1500.0 * (100.0 / max(1, val))))))
                     self.refresh_tree()
             elif isinstance(stmt, DelayStatement):
                 val, ok = QInputDialog.getInt(self, "Muokkaa viivettä", "Pitoaika / viive (ms):", stmt.duration_ms, 50, 10000, 50)
