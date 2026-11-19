@@ -349,6 +349,20 @@ class PickAndPlaceDialog(QDialog):
         self.spin_speed.setValue(50)
         grid.addWidget(self.spin_speed, 3, 1)
 
+        grid.addWidget(QLabel("Pinoamismuoto / Kerrokset (Z-pino):"), 4, 0)
+        self.spin_layers = QSpinBox()
+        self.spin_layers.setRange(1, 5)
+        self.spin_layers.setValue(1)
+        self.spin_layers.setToolTip("Kuinka monta kuutiota/kappaletta pinotaan päällekkäin (1 = normaali siirto, 2-5 = pinoaminen)")
+        grid.addWidget(self.spin_layers, 4, 1)
+
+        grid.addWidget(QLabel("Kuution korkeus (mm):"), 5, 0)
+        self.spin_layer_h = QSpinBox()
+        self.spin_layer_h.setRange(5, 80)
+        self.spin_layer_h.setValue(30)
+        self.spin_layer_h.setToolTip("Yhden kappaleen korkeus (siirtää jättöpistettä automaattisesti +Z jokaisella kerroksella)")
+        grid.addWidget(self.spin_layer_h, 5, 1)
+
         layout.addLayout(grid)
 
         btn_box = QHBoxLayout()
@@ -368,6 +382,9 @@ class PickAndPlaceDialog(QDialog):
         app_h = float(self.spin_app_z.value())
         dist = float(self.spin_dist.value())
         d_idx = self.combo_dir.currentIndex()
+        num_layers = self.spin_layers.value()
+        layer_h = float(self.spin_layer_h.value())
+        spd = self.spin_speed.value()
 
         dx, dy = 0.0, 0.0
         if d_idx == 0: dy = dist
@@ -375,52 +392,68 @@ class PickAndPlaceDialog(QDialog):
         elif d_idx == 2: dx = dist
         elif d_idx == 3: dx = -dist
 
-        # Compute Pick and Place waypoints
-        # 1. Approach to Pick (+Z)
-        sol_app_pick, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x, p_pick.tcp_y, p_pick.tcp_z + app_h, current_angles=self.current_angles)
-        # 2. Pick touchdown (current pose)
-        sol_pick = list(self.current_angles)
-        # 3. Retract from Pick (+Z)
-        sol_ret_pick, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x, p_pick.tcp_y, p_pick.tcp_z + app_h, current_angles=sol_pick)
-        # 4. Approach to Place (Pick + (dx, dy, app_h))
-        sol_app_place, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x + dx, p_pick.tcp_y + dy, p_pick.tcp_z + app_h, current_angles=sol_ret_pick or sol_pick)
-        # 5. Place touchdown (Pick + (dx, dy, 0))
-        sol_place, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x + dx, p_pick.tcp_y + dy, p_pick.tcp_z, current_angles=sol_app_place or sol_pick)
-        # 6. Retract from Place
-        sol_ret_place = sol_app_place
+        # Turvakorkeus koko siirron ajaksi: aina ylimmän pinon yläpuolella
+        max_stack_z = p_pick.tcp_z + ((num_layers - 1) * layer_h)
+        safe_clearance_z = max_stack_z + app_h
 
-        if not all([sol_app_pick, sol_pick, sol_ret_pick, sol_app_place, sol_place]):
-            QMessageBox.warning(self, "Ulottuvuusraja", "Pick & Place -siirron kohde ylittää robotin ulottuvuusalueen!\nKokeile pienempää siirtomatkaa.")
-            return
+        # Tarkistetaan etukäteen että kaikki pisteet ovat ulottuvuusalueella
+        steps_plan = []
+        curr_seed = list(self.current_angles)
 
-        spd = self.spin_speed.value()
+        for layer in range(num_layers):
+            layer_drop_z = p_pick.tcp_z + (layer * layer_h)
+
+            # 1. Approach to Pick (+app_h)
+            sol_app_pick, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x, p_pick.tcp_y, p_pick.tcp_z + app_h, current_angles=curr_seed)
+            # 2. Pick touchdown
+            sol_pick, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x, p_pick.tcp_y, p_pick.tcp_z, current_angles=sol_app_pick or curr_seed)
+            # 3. Retract from Pick to safe clearance height
+            sol_ret_pick, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x, p_pick.tcp_y, safe_clearance_z, current_angles=sol_pick or curr_seed)
+            # 4. Transfer to Place above stack at safe clearance height
+            sol_app_place, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x + dx, p_pick.tcp_y + dy, safe_clearance_z, current_angles=sol_ret_pick or curr_seed)
+            # 5. Place touchdown at current layer height
+            sol_place, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x + dx, p_pick.tcp_y + dy, layer_drop_z, current_angles=sol_app_place or curr_seed)
+            # 6. Retract from Place to safe clearance height
+            sol_ret_place, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x + dx, p_pick.tcp_y + dy, safe_clearance_z, current_angles=sol_place or curr_seed)
+
+            if not all([sol_app_pick, sol_pick, sol_ret_pick, sol_app_place, sol_place, sol_ret_place]):
+                QMessageBox.warning(self, "Ulottuvuusraja", f"Kerroksen {layer + 1} pinoamiskorkeus tai siirtomatka ylittää robotin ulottuvuusalueen!\nKokeile pienempää siirtomatkaa tai matalampaa kuutiota.")
+                return
+
+            curr_seed = sol_ret_place
+            steps_plan.append((layer, sol_app_pick, sol_pick, sol_ret_pick, sol_app_place, sol_place, sol_ret_place, layer_drop_z))
+
         self.result_statements = []
-        # Step 1: PTP Approach Pick
-        self.result_statements.append(("PTP", sol_app_pick, 100, f"Lähestyminen poimintaan (+{int(app_h)}mm)"))
-        # Step 2: LIN Down to Pick
-        self.result_statements.append(("LIN", sol_pick, 40, "Laskeutuminen kappaleeseen (Pick)"))
-        # Step 3: Grip / Vacuum ON
-        if self.tool_type == "GRIPPER":
-            self.result_statements.append(("GRIPPER", "CLOSE", 180, "Tartu kappaleeseen (Koura kiinni)"))
-        else:
-            self.result_statements.append(("TOOL_ACTION", "VACUUM", "ON", "Imu PÄÄLLE (Tyhjiö aktivoitu)"))
-        # Step 4: Dwell
-        self.result_statements.append(("DELAY", 500, 0, "Odotus / Ote vakiintuu (500 ms)"))
-        # Step 5: LIN Retract Up
-        self.result_statements.append(("LIN", sol_ret_pick, 50, f"Nosto poimintapisteestä (+{int(app_h)}mm)"))
-        # Step 6: PTP Transfer to Place
-        self.result_statements.append(("PTP", sol_app_place, spd, f"Siirto asennuspisteen ylle (+{int(dist)}mm)"))
-        # Step 7: LIN Down to Place
-        self.result_statements.append(("LIN", sol_place, 40, "Lasku asennuspintaan (Place)"))
-        # Step 8: Release / Vacuum OFF
-        if self.tool_type == "GRIPPER":
-            self.result_statements.append(("GRIPPER", "OPEN", 20, "Päästä kappale (Koura auki)"))
-        else:
-            self.result_statements.append(("TOOL_ACTION", "VACUUM", "OFF", "Imu POIS (Kappaleen vapautus)"))
-        # Step 9: Dwell
-        self.result_statements.append(("DELAY", 300, 0, "Odotus / Vapautus (300 ms)"))
-        # Step 10: LIN Retract Up
-        self.result_statements.append(("LIN", sol_ret_place, 80, "Nosto asennuspisteestä turvakorkeuteen"))
+
+        for layer, s_app_pick, s_pick, s_ret_pick, s_app_place, s_place, s_ret_place, drop_z in steps_plan:
+            lbl_layer = f" (Kerros {layer + 1}/{num_layers})" if num_layers > 1 else ""
+
+            # 1. PTP Lähestyminen poimintaan
+            self.result_statements.append(("PTP", s_app_pick, 100, f"Lähestyminen poimintaan (+{int(app_h)}mm){lbl_layer}"))
+            # 2. LIN Laskeutuminen kuutioon
+            self.result_statements.append(("LIN", s_pick, 40, f"Laskeutuminen kuutioon (Pick){lbl_layer}"))
+            # 3. Koura kiinni / Imu päälle
+            if self.tool_type == "GRIPPER":
+                self.result_statements.append(("GRIPPER", "CLOSE", 180, f"Tartu kuutioon (Koura kiinni){lbl_layer}"))
+            else:
+                self.result_statements.append(("TOOL_ACTION", "VACUUM", "ON", f"Imu PÄÄLLE (Tyhjiö aktivoitu){lbl_layer}"))
+            # 4. Viive
+            self.result_statements.append(("DELAY", 500, 0, "Odotus / Ote vakiintuu (500 ms)"))
+            # 5. LIN Nosto turvakorkeuteen
+            self.result_statements.append(("LIN", s_ret_pick, 50, f"Nosto turvakorkeuteen ({safe_clearance_z:.0f} mm){lbl_layer}"))
+            # 6. PTP Siirto pinon ylle
+            self.result_statements.append(("PTP", s_app_place, spd, f"Siirto pinon ylle turvakorkeudessa{lbl_layer}"))
+            # 7. LIN Laskeutuminen pinoon
+            self.result_statements.append(("LIN", s_place, 40, f"Lasku pinoon (Z: {drop_z:.0f} mm){lbl_layer}"))
+            # 8. Koura auki / Imu pois
+            if self.tool_type == "GRIPPER":
+                self.result_statements.append(("GRIPPER", "OPEN", 20, f"Vapauta kuutio (Koura auki){lbl_layer}"))
+            else:
+                self.result_statements.append(("TOOL_ACTION", "VACUUM", "OFF", f"Imu POIS (Kuution vapautus){lbl_layer}"))
+            # 9. Viive
+            self.result_statements.append(("DELAY", 300, 0, "Odotus / Vapautus (300 ms)"))
+            # 10. LIN Nosto turvakorkeuteen pinon päältä
+            self.result_statements.append(("LIN", s_ret_place, 70, f"Nosto pinosta turvakorkeuteen{lbl_layer}"))
 
         self.accept()
 
