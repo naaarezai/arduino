@@ -9,14 +9,14 @@
         "comment": "Siirto pisteeseen P1",
         "target_id": "P1",
         "angles": [
-          101,
-          97,
-          133,
-          174,
+          120,
+          110,
+          148,
+          168,
           91,
           20
         ],
-        "speed_percent": 100,
+        "speed_percent": 1,
         "duration_ms": 1500,
         "is_welding": false
       },
@@ -25,10 +25,10 @@
         "comment": "Suoraviivainen siirto (P2)",
         "target_id": "P2",
         "angles": [
-          95,
-          87,
-          172,
-          144,
+          106,
+          106,
+          180,
+          155,
           91,
           20
         ],
@@ -37,64 +37,32 @@
         "is_welding": false
       },
       {
-        "statement_type": "LIN",
-        "comment": "Suoraviivainen siirto (P3)",
+        "statement_type": "PTP",
+        "comment": "Siirto pisteeseen P3",
         "target_id": "P3",
         "angles": [
-          117,
-          133,
-          151,
-          157,
+          118,
+          140,
+          129,
+          158,
           91,
           20
         ],
         "speed_percent": 100,
         "duration_ms": 1500,
         "is_welding": false
-      },
-      {
-        "statement_type": "DELAY",
-        "comment": "Odotus 500 ms",
-        "duration_ms": 500
-      },
-      {
-        "statement_type": "DELAY",
-        "comment": "Odotus 500 ms",
-        "duration_ms": 500
-      },
-      {
-        "statement_type": "DELAY",
-        "comment": "Odotus 500 ms",
-        "duration_ms": 500
-      },
-      {
-        "statement_type": "DELAY",
-        "comment": "Odotus 500 ms",
-        "duration_ms": 500
-      },
-      {
-        "statement_type": "DELAY",
-        "comment": "Odotus 500 ms",
-        "duration_ms": 500
-      },
-      {
-        "statement_type": "GRIPPER",
-        "comment": "Koura kiinni (Ote)",
-        "action": "CLOSE",
-        "target_angle": 180,
-        "duration_ms": 500
       },
       {
         "statement_type": "LIN",
         "comment": "Suoraviivainen siirto (P4)",
         "target_id": "P4",
         "angles": [
-          122,
-          129,
-          133,
+          108,
+          121,
           176,
+          137,
           91,
-          180
+          20
         ],
         "speed_percent": 100,
         "duration_ms": 1500,
@@ -105,12 +73,12 @@
         "comment": "Siirto pisteeseen P5",
         "target_id": "P5",
         "angles": [
-          121,
-          124,
-          135,
-          173,
+          21,
+          102,
+          162,
+          176,
           91,
-          180
+          20
         ],
         "speed_percent": 100,
         "duration_ms": 1500,
@@ -121,28 +89,35 @@
         "comment": "Suoraviivainen siirto (P6)",
         "target_id": "P6",
         "angles": [
-          149,
-          121,
-          133,
-          164,
+          19,
+          68,
+          176,
+          175,
           91,
-          180
+          20
         ],
         "speed_percent": 100,
         "duration_ms": 1500,
         "is_welding": false
       },
       {
-        "statement_type": "LIN",
-        "comment": "Suoraviivainen siirto (P7)",
+        "statement_type": "GRIPPER",
+        "comment": "Koura kiinni (Ote)",
+        "action": "CLOSE",
+        "target_angle": 100,
+        "duration_ms": 500
+      },
+      {
+        "statement_type": "PTP",
+        "comment": "Siirto pisteeseen P7",
         "target_id": "P7",
         "angles": [
-          180,
-          103,
-          180,
-          153,
+          83,
+          71,
+          175,
+          168,
           91,
-          180
+          100
         ],
         "speed_percent": 100,
         "duration_ms": 1500,
@@ -153,12 +128,12 @@
         "comment": "Suoraviivainen siirto (P8)",
         "target_id": "P8",
         "angles": [
-          180,
-          124,
-          180,
-          153,
+          89,
+          90,
+          176,
+          162,
           91,
-          180
+          100
         ],
         "speed_percent": 100,
         "duration_ms": 1500,
@@ -172,55 +147,14 @@
         "duration_ms": 500
       },
       {
-        "statement_type": "DELAY",
-        "comment": "Odotus 500 ms",
-        "duration_ms": 500
-      },
-      {
-        "statement_type": "DELAY",
-        "comment": "Odotus 500 ms",
-        "duration_ms": 500
-      },
-      {
-        "statement_type": "DELAY",
-        "comment": "Odotus 500 ms",
-        "duration_ms": 500
-      },
-      {
-        "statement_type": "DELAY",
-        "comment": "Odotus 500 ms",
-        "duration_ms": 500
-      },
-      {
-        "statement_type": "DELAY",
-        "comment": "Odotus 500 ms",
-        "duration_ms": 500
-      },
-      {
-        "statement_type": "LIN",
-        "comment": "Suoraviivainen siirto (P9)",
+        "statement_type": "PTP",
+        "comment": "Siirto pisteeseen P9",
         "target_id": "P9",
         "angles": [
-          179,
-          108,
-          180,
-          153,
-          91,
-          20
-        ],
-        "speed_percent": 100,
-        "duration_ms": 1500,
-        "is_welding": false
-      },
-      {
-        "statement_type": "PTP",
-        "comment": "Siirto pisteeseen P10",
-        "target_id": "P10",
-        "angles": [
-          121,
-          116,
-          135,
-          175,
+          105,
+          72,
+          150,
+          136,
           91,
           20
         ],
@@ -253,10 +187,10 @@
     "rot_z": 0.0
   },
   "current_angles": [
-    121,
-    116,
-    135,
-    175,
+    106,
+    106,
+    180,
+    155,
     91,
     20
   ]
