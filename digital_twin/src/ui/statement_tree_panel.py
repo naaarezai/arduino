@@ -321,13 +321,23 @@ class PickAndPlaceDialog(QDialog):
         grid = QGridLayout()
         grid.setSpacing(8)
 
-        grid.addWidget(QLabel("Nostokorkeus / Approach Z (mm):"), 0, 0)
+        grid.addWidget(QLabel("Toimintatila / Kuvio:"), 0, 0)
+        self.combo_pattern = QComboBox()
+        self.combo_pattern.addItems([
+            "📦 Rivi -> Pino (Kerrokset päällekkäin)",
+            "📤 Pino -> Rivi (Pinon purku vierekkäin)",
+            "🏗️ Pino -> Pino (Pinon siirto tornina)",
+            "➡️ Yksittäissiirto (1 kappale)"
+        ])
+        grid.addWidget(self.combo_pattern, 0, 1)
+
+        grid.addWidget(QLabel("Nostokorkeus / Approach Z (mm):"), 1, 0)
         self.spin_app_z = QSpinBox()
         self.spin_app_z.setRange(10, 100)
         self.spin_app_z.setValue(30)
-        grid.addWidget(self.spin_app_z, 0, 1)
+        grid.addWidget(self.spin_app_z, 1, 1)
 
-        grid.addWidget(QLabel("Siirtosuunta:"), 1, 0)
+        grid.addWidget(QLabel("Siirtosuunta:"), 2, 0)
         self.combo_dir = QComboBox()
         self.combo_dir.addItems([
             "+Y (Vasen / Left)",
@@ -335,33 +345,33 @@ class PickAndPlaceDialog(QDialog):
             "+X (Eteen / Forward)",
             "-X (Taakse / Backward)"
         ])
-        grid.addWidget(self.combo_dir, 1, 1)
+        grid.addWidget(self.combo_dir, 2, 1)
 
-        grid.addWidget(QLabel("Siirtomatka / Distance (mm):"), 2, 0)
+        grid.addWidget(QLabel("Siirtomatka / Distance (mm):"), 3, 0)
         self.spin_dist = QSpinBox()
         self.spin_dist.setRange(20, 300)
         self.spin_dist.setValue(100)
-        grid.addWidget(self.spin_dist, 2, 1)
+        grid.addWidget(self.spin_dist, 3, 1)
 
-        grid.addWidget(QLabel("Siirtonopeus (%):"), 3, 0)
+        grid.addWidget(QLabel("Siirtonopeus (%):"), 4, 0)
         self.spin_speed = QSpinBox()
         self.spin_speed.setRange(10, 100)
         self.spin_speed.setValue(50)
-        grid.addWidget(self.spin_speed, 3, 1)
+        grid.addWidget(self.spin_speed, 4, 1)
 
-        grid.addWidget(QLabel("Pinoamismuoto / Kerrokset (Z-pino):"), 4, 0)
+        grid.addWidget(QLabel("Kappaleiden määrä (kpl):"), 5, 0)
         self.spin_layers = QSpinBox()
         self.spin_layers.setRange(1, 5)
-        self.spin_layers.setValue(1)
-        self.spin_layers.setToolTip("Kuinka monta kuutiota/kappaletta pinotaan päällekkäin (1 = normaali siirto, 2-5 = pinoaminen)")
-        grid.addWidget(self.spin_layers, 4, 1)
+        self.spin_layers.setValue(3)
+        self.spin_layers.setToolTip("Kuinka monta kuutiota siirretään/pinotaan (1-5 kpl)")
+        grid.addWidget(self.spin_layers, 5, 1)
 
-        grid.addWidget(QLabel("Kuution korkeus (mm):"), 5, 0)
+        grid.addWidget(QLabel("Kuution koko / korkeus (mm):"), 6, 0)
         self.spin_layer_h = QSpinBox()
         self.spin_layer_h.setRange(5, 80)
         self.spin_layer_h.setValue(30)
-        self.spin_layer_h.setToolTip("Yhden kappaleen korkeus (siirtää jättöpistettä automaattisesti +Z jokaisella kerroksella)")
-        grid.addWidget(self.spin_layer_h, 5, 1)
+        self.spin_layer_h.setToolTip("Kuution korkeus/leveys millimetreinä (Z-offset pinoon tai X/Y-väli riviin)")
+        grid.addWidget(self.spin_layer_h, 6, 1)
 
         layout.addLayout(grid)
 
@@ -382,78 +392,114 @@ class PickAndPlaceDialog(QDialog):
         app_h = float(self.spin_app_z.value())
         dist = float(self.spin_dist.value())
         d_idx = self.combo_dir.currentIndex()
-        num_layers = self.spin_layers.value()
+        pattern_mode = self.combo_pattern.currentIndex()
+        num_layers = self.spin_layers.value() if pattern_mode != 3 else 1
         layer_h = float(self.spin_layer_h.value())
         spd = self.spin_speed.value()
 
-        dx, dy = 0.0, 0.0
-        if d_idx == 0: dy = dist
-        elif d_idx == 1: dy = -dist
-        elif d_idx == 2: dx = dist
-        elif d_idx == 3: dx = -dist
+        # Suunnan yksikkövektori (unit direction)
+        ux, uy = 0.0, 0.0
+        if d_idx == 0: uy = 1.0
+        elif d_idx == 1: uy = -1.0
+        elif d_idx == 2: ux = 1.0
+        elif d_idx == 3: ux = -1.0
 
-        # Turvakorkeus koko siirron ajaksi: aina ylimmän pinon yläpuolella
-        max_stack_z = p_pick.tcp_z + ((num_layers - 1) * layer_h)
-        safe_clearance_z = max_stack_z + app_h
+        dx = ux * dist
+        dy = uy * dist
 
-        # Tarkistetaan etukäteen että kaikki pisteet ovat ulottuvuusalueella
+        # Maksimikorkeus pinossa (turvakorkeuslaskentaa varten)
+        max_stack_h = (num_layers - 1) * layer_h if num_layers > 1 else 0.0
+        safe_clearance_z = p_pick.tcp_z + max_stack_h + app_h
+
         steps_plan = []
         curr_seed = list(self.current_angles)
 
-        for layer in range(num_layers):
-            layer_drop_z = p_pick.tcp_z + (layer * layer_h)
+        for k in range(num_layers):
+            # Määritellään poiminta- ja jättöpisteet valitun kuvion mukaan:
+            if pattern_mode == 0:
+                # 📦 Rivi -> Pino (Poiminta pöydältä/syöttimestä, jättö nousevaan pinoon)
+                pick_x = p_pick.tcp_x
+                pick_y = p_pick.tcp_y
+                pick_z = p_pick.tcp_z
+                place_x = p_pick.tcp_x + dx
+                place_y = p_pick.tcp_y + dy
+                place_z = p_pick.tcp_z + (k * layer_h)
+            elif pattern_mode == 1:
+                # 📤 Pino -> Rivi (Poiminta pinon huipulta alas, jättö riviin vierekkäin pöydälle)
+                pick_x = p_pick.tcp_x
+                pick_y = p_pick.tcp_y
+                pick_z = p_pick.tcp_z + ((num_layers - 1 - k) * layer_h)
+                place_x = p_pick.tcp_x + dx + (ux * (k * (layer_h + 10.0)))
+                place_y = p_pick.tcp_y + dy + (uy * (k * (layer_h + 10.0)))
+                place_z = p_pick.tcp_z
+            elif pattern_mode == 2:
+                # 🏗️ Pino -> Pino (Siirretään pino toiseen paikkaan: huipulta otetaan, pohjalta kasataan)
+                pick_x = p_pick.tcp_x
+                pick_y = p_pick.tcp_y
+                pick_z = p_pick.tcp_z + ((num_layers - 1 - k) * layer_h)
+                place_x = p_pick.tcp_x + dx
+                place_y = p_pick.tcp_y + dy
+                place_z = p_pick.tcp_z + (k * layer_h)
+            else:
+                # ➡️ Yksittäissiirto
+                pick_x = p_pick.tcp_x
+                pick_y = p_pick.tcp_y
+                pick_z = p_pick.tcp_z
+                place_x = p_pick.tcp_x + dx
+                place_y = p_pick.tcp_y + dy
+                place_z = p_pick.tcp_z
 
             # 1. Approach to Pick (+app_h)
-            sol_app_pick, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x, p_pick.tcp_y, p_pick.tcp_z + app_h, current_angles=curr_seed)
+            sol_app_pick, _ = self.kinematics.solve_ik_clamped(pick_x, pick_y, safe_clearance_z, current_angles=curr_seed)
             # 2. Pick touchdown
-            sol_pick, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x, p_pick.tcp_y, p_pick.tcp_z, current_angles=sol_app_pick or curr_seed)
+            sol_pick, _ = self.kinematics.solve_ik_clamped(pick_x, pick_y, pick_z, current_angles=sol_app_pick or curr_seed)
             # 3. Retract from Pick to safe clearance height
-            sol_ret_pick, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x, p_pick.tcp_y, safe_clearance_z, current_angles=sol_pick or curr_seed)
-            # 4. Transfer to Place above stack at safe clearance height
-            sol_app_place, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x + dx, p_pick.tcp_y + dy, safe_clearance_z, current_angles=sol_ret_pick or curr_seed)
-            # 5. Place touchdown at current layer height
-            sol_place, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x + dx, p_pick.tcp_y + dy, layer_drop_z, current_angles=sol_app_place or curr_seed)
+            sol_ret_pick, _ = self.kinematics.solve_ik_clamped(pick_x, pick_y, safe_clearance_z, current_angles=sol_pick or curr_seed)
+            # 4. Transfer to Place at safe clearance height
+            sol_app_place, _ = self.kinematics.solve_ik_clamped(place_x, place_y, safe_clearance_z, current_angles=sol_ret_pick or curr_seed)
+            # 5. Place touchdown at target height
+            sol_place, _ = self.kinematics.solve_ik_clamped(place_x, place_y, place_z, current_angles=sol_app_place or curr_seed)
             # 6. Retract from Place to safe clearance height
-            sol_ret_place, _ = self.kinematics.solve_ik_clamped(p_pick.tcp_x + dx, p_pick.tcp_y + dy, safe_clearance_z, current_angles=sol_place or curr_seed)
+            sol_ret_place, _ = self.kinematics.solve_ik_clamped(place_x, place_y, safe_clearance_z, current_angles=sol_place or curr_seed)
 
             if not all([sol_app_pick, sol_pick, sol_ret_pick, sol_app_place, sol_place, sol_ret_place]):
-                QMessageBox.warning(self, "Ulottuvuusraja", f"Kerroksen {layer + 1} pinoamiskorkeus tai siirtomatka ylittää robotin ulottuvuusalueen!\nKokeile pienempää siirtomatkaa tai matalampaa kuutiota.")
+                QMessageBox.warning(self, "Ulottuvuusraja", f"Kappaleen {k + 1} siirtopiste ylittää robotin ulottuvuusalueen!\nKokeile pienempää siirtomatkaa tai matalampaa kuutiota.")
                 return
 
             curr_seed = sol_ret_place
-            steps_plan.append((layer, sol_app_pick, sol_pick, sol_ret_pick, sol_app_place, sol_place, sol_ret_place, layer_drop_z))
+            steps_plan.append((k, sol_app_pick, sol_pick, sol_ret_pick, sol_app_place, sol_place, sol_ret_place, pick_z, place_z))
 
         self.result_statements = []
 
-        for layer, s_app_pick, s_pick, s_ret_pick, s_app_place, s_place, s_ret_place, drop_z in steps_plan:
-            lbl_layer = f" (Kerros {layer + 1}/{num_layers})" if num_layers > 1 else ""
+        for k, s_app_pick, s_pick, s_ret_pick, s_app_place, s_place, s_ret_place, p_z, d_z in steps_plan:
+            lbl = f" (Kuutio {k + 1}/{num_layers})" if num_layers > 1 else ""
 
             # 1. PTP Lähestyminen poimintaan
-            self.result_statements.append(("PTP", s_app_pick, 100, f"Lähestyminen poimintaan (+{int(app_h)}mm){lbl_layer}"))
+            self.result_statements.append(("PTP", s_app_pick, 100, f"Lähestyminen poimintaan turvakorkeudessa{lbl}"))
             # 2. LIN Laskeutuminen kuutioon
-            self.result_statements.append(("LIN", s_pick, 40, f"Laskeutuminen kuutioon (Pick){lbl_layer}"))
+            self.result_statements.append(("LIN", s_pick, 40, f"Laskeutuminen kuutioon (Z: {p_z:.0f} mm){lbl}"))
             # 3. Koura kiinni / Imu päälle
             if self.tool_type == "GRIPPER":
-                self.result_statements.append(("GRIPPER", "CLOSE", 180, f"Tartu kuutioon (Koura kiinni){lbl_layer}"))
+                self.result_statements.append(("GRIPPER", "CLOSE", 180, f"Tartu kuutioon (Koura kiinni){lbl}"))
             else:
-                self.result_statements.append(("TOOL_ACTION", "VACUUM", "ON", f"Imu PÄÄLLE (Tyhjiö aktivoitu){lbl_layer}"))
+                self.result_statements.append(("TOOL_ACTION", "VACUUM", "ON", f"Imu PÄÄLLE (Tyhjiö aktivoitu){lbl}"))
             # 4. Viive
             self.result_statements.append(("DELAY", 500, 0, "Odotus / Ote vakiintuu (500 ms)"))
             # 5. LIN Nosto turvakorkeuteen
-            self.result_statements.append(("LIN", s_ret_pick, 50, f"Nosto turvakorkeuteen ({safe_clearance_z:.0f} mm){lbl_layer}"))
-            # 6. PTP Siirto pinon ylle
-            self.result_statements.append(("PTP", s_app_place, spd, f"Siirto pinon ylle turvakorkeudessa{lbl_layer}"))
-            # 7. LIN Laskeutuminen pinoon
-            self.result_statements.append(("LIN", s_place, 40, f"Lasku pinoon (Z: {drop_z:.0f} mm){lbl_layer}"))
+            self.result_statements.append(("LIN", s_ret_pick, 50, f"Nosto turvakorkeuteen ({safe_clearance_z:.0f} mm){lbl}"))
+            # 6. PTP Siirto jätön ylle
+            self.result_statements.append(("PTP", s_app_place, spd, f"Siirto asennuspaikan ylle turvakorkeudessa{lbl}"))
+            # 7. LIN Laskeutuminen jättöön
+            self.result_statements.append(("LIN", s_place, 40, f"Lasku jättökohteeseen (Z: {d_z:.0f} mm){lbl}"))
             # 8. Koura auki / Imu pois
             if self.tool_type == "GRIPPER":
-                self.result_statements.append(("GRIPPER", "OPEN", 20, f"Vapauta kuutio (Koura auki){lbl_layer}"))
+                self.result_statements.append(("GRIPPER", "OPEN", 20, f"Vapauta kuutio (Koura auki){lbl}"))
             else:
-                self.result_statements.append(("TOOL_ACTION", "VACUUM", "OFF", f"Imu POIS (Kuution vapautus){lbl_layer}"))
+                self.result_statements.append(("TOOL_ACTION", "VACUUM", "OFF", f"Imu POIS (Kuution vapautus){lbl}"))
             # 9. Viive
             self.result_statements.append(("DELAY", 300, 0, "Odotus / Vapautus (300 ms)"))
-            # 10. LIN Nosto turvakorkeuteen pinon päältä
-            self.result_statements.append(("LIN", s_ret_place, 70, f"Nosto pinosta turvakorkeuteen{lbl_layer}"))
+            # 10. LIN Nosto turvakorkeuteen
+            self.result_statements.append(("LIN", s_ret_place, 70, f"Nosto turvakorkeuteen pinon päältä{lbl}"))
 
         self.accept()
 
